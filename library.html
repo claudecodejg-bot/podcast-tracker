@@ -102,7 +102,9 @@
     document.querySelector('.nav-center').classList.toggle('open')
   })
 
-  let currentUser = null
+  let currentUser      = null
+  let userCategories   = []
+  let activeCatFilter  = null  // null=All, ''=Uncategorized, uuid=specific cat
 
   async function init() {
     const session = await requireLogin()
@@ -257,17 +259,15 @@
   async function loadPodcasts() {
     const list = document.getElementById('podcasts-list')
 
-    const { data: subs } = await supabase
-      .from('subscriptions')
-      .select(`
-        podcast_id,
-        podcasts(
-          id, title, author, artwork_url, platform,
-          podcast_likes(count)
-        )
-      `)
-      .eq('user_id', currentUser.id)
-      .order('created_at', { ascending: false })
+    const [{ data: cats }, { data: subs }] = await Promise.all([
+      supabase.from('user_categories').select('*').order('sort_order'),
+      supabase.from('subscriptions').select(`
+        id, user_category_id, podcast_id,
+        podcasts(id, title, author, artwork_url, platform, podcast_likes(count))
+      `).eq('user_id', currentUser.id).order('created_at', { ascending: false })
+    ])
+
+    userCategories = cats || []
 
     if (!subs?.length) {
       list.innerHTML = `<div class="empty-state">
@@ -278,27 +278,132 @@
       return
     }
 
-    list.innerHTML = `<div class="grid-3">` +
-      subs.map(s => {
-        const p = s.podcasts
-        const likes = p?.podcast_likes?.[0]?.count || 0
-        return `
-          <a href="podcast.html?id=${p.id}" class="podcast-card" style="text-decoration:none">
-            ${p.artwork_url
-              ? `<img class="podcast-card-art" src="${escHtml(p.artwork_url)}" alt="" loading="lazy">`
-              : '<div class="podcast-card-art-placeholder">🎙️</div>'
-            }
-            <div class="podcast-card-body">
-              <div class="podcast-card-title">${escHtml(p.title)}</div>
-              <div class="podcast-card-author text-muted">${escHtml(p.author || '')}</div>
-              <div class="podcast-card-footer">
-                ${platformBadge(p.platform)}
-                ${likes ? `<span class="text-muted text-sm">❤️ ${likes}</span>` : ''}
-              </div>
+    renderFollowing(list, subs)
+  }
+
+  function renderFollowing(list, subs) {
+    const filtered = activeCatFilter === null ? subs
+      : activeCatFilter === '' ? subs.filter(s => !s.user_category_id)
+      : subs.filter(s => s.user_category_id === activeCatFilter)
+
+    const catOptions = `<option value="">— No Category —</option>` +
+      userCategories.map(c =>
+        `<option value="${escHtml(c.id)}">${escHtml(c.icon)} ${escHtml(c.name)}</option>`
+      ).join('')
+
+    list.innerHTML = `
+      <!-- Category filter bar -->
+      <div class="filter-bar" style="flex-wrap:wrap;gap:0.4rem;margin-bottom:0.6rem">
+        <button class="filter-chip ${activeCatFilter === null ? 'active' : ''}" data-cat="__all__">All (${subs.length})</button>
+        ${userCategories.map(c => `
+          <span style="display:inline-flex;align-items:center">
+            <button class="filter-chip ${activeCatFilter === c.id ? 'active' : ''}" data-cat="${escHtml(c.id)}"
+              style="border-radius:20px 0 0 20px;padding-right:0.4rem">
+              ${escHtml(c.icon)} ${escHtml(c.name)} (${subs.filter(s => s.user_category_id === c.id).length})
+            </button>
+            <button data-del-cat="${escHtml(c.id)}" title="Delete category"
+              style="background:var(--bg-elevated);border:1px solid var(--border);border-left:none;border-radius:0 20px 20px 0;padding:0.28rem 0.5rem;cursor:pointer;font-size:0.7rem;color:var(--text-muted);line-height:1">✕</button>
+          </span>`).join('')}
+        <button class="filter-chip ${activeCatFilter === '' ? 'active' : ''}" data-cat="__none__">
+          Uncategorized (${subs.filter(s => !s.user_category_id).length})
+        </button>
+      </div>
+
+      <!-- Add new category -->
+      <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;margin-bottom:1rem">
+        <input type="text" id="new-cat-icon" placeholder="📁" maxlength="2"
+          style="width:44px;text-align:center;padding:0.3rem;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);font-size:0.9rem">
+        <input type="text" id="new-cat-name" placeholder="New category name…"
+          style="flex:1;min-width:150px;padding:0.3rem 0.6rem;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);font-size:0.85rem">
+        <button class="btn btn-sm btn-primary" id="add-cat-btn">+ Add</button>
+      </div>
+
+      <!-- Podcasts grid -->
+      <div class="grid-3">
+        ${filtered.length
+          ? filtered.map(s => followCardHTML(s, catOptions)).join('')
+          : '<p class="text-muted" style="grid-column:1/-1;padding:1rem 0">No podcasts in this category.</p>'
+        }
+      </div>`
+
+    // Filter chip clicks
+    list.querySelectorAll('[data-cat]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const v = btn.dataset.cat
+        activeCatFilter = v === '__all__' ? null : v === '__none__' ? '' : v
+        renderFollowing(list, subs)
+      })
+    })
+
+    // Delete category buttons
+    list.querySelectorAll('[data-del-cat]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const cat = userCategories.find(c => c.id === btn.dataset.delCat)
+        if (!cat) return
+        if (!confirm(`Delete "${cat.icon} ${cat.name}"? Podcasts in it will become uncategorized.`)) return
+        await supabase.from('user_categories').delete().eq('id', cat.id)
+        if (activeCatFilter === cat.id) activeCatFilter = null
+        await loadPodcasts()
+      })
+    })
+
+    // Category dropdowns on each card
+    list.querySelectorAll('.sub-cat-select').forEach(sel => {
+      const sub = subs.find(s => s.id === sel.dataset.subId)
+      if (sub?.user_category_id) sel.value = sub.user_category_id
+      sel.addEventListener('change', async () => {
+        await supabase.from('subscriptions')
+          .update({ user_category_id: sel.value || null })
+          .eq('id', sel.dataset.subId)
+        const s = subs.find(s => s.id === sel.dataset.subId)
+        if (s) s.user_category_id = sel.value || null
+        renderFollowing(list, subs)
+      })
+    })
+
+    // Add category button
+    document.getElementById('add-cat-btn')?.addEventListener('click', async () => {
+      const nameEl = document.getElementById('new-cat-name')
+      const iconEl = document.getElementById('new-cat-icon')
+      const name   = nameEl.value.trim()
+      const icon   = iconEl.value.trim() || '📁'
+      if (!name) { nameEl.focus(); return }
+      const { error } = await supabase.from('user_categories').insert({
+        user_id: currentUser.id, name, icon, sort_order: userCategories.length
+      })
+      if (error) { alert(`Could not add category: ${error.message}`); return }
+      nameEl.value = ''
+      iconEl.value = ''
+      await loadPodcasts()
+    })
+  }
+
+  function followCardHTML(s, catOptions) {
+    const p     = s.podcasts
+    const likes = p?.podcast_likes?.[0]?.count || 0
+    return `
+      <div class="podcast-card" style="display:flex;flex-direction:column">
+        <a href="podcast.html?id=${p.id}" style="text-decoration:none;flex:1;display:flex;flex-direction:column">
+          ${p.artwork_url
+            ? `<img class="podcast-card-art" src="${escHtml(p.artwork_url)}" alt="" loading="lazy">`
+            : '<div class="podcast-card-art-placeholder">🎙️</div>'
+          }
+          <div class="podcast-card-body" style="flex:1">
+            <div class="podcast-card-title">${escHtml(p.title)}</div>
+            <div class="podcast-card-author text-muted">${escHtml(p.author || '')}</div>
+            <div class="podcast-card-footer">
+              ${platformBadge(p.platform)}
+              ${likes ? `<span class="text-muted text-sm">❤️ ${likes}</span>` : ''}
             </div>
-          </a>`
-      }).join('') +
-      `</div>`
+          </div>
+        </a>
+        <div style="padding:0.5rem 0.75rem;border-top:1px solid var(--bg-elevated)">
+          <select class="sub-cat-select" data-sub-id="${s.id}"
+            style="width:100%;font-size:0.78rem;padding:0.25rem 0.4rem;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text)">
+            ${catOptions}
+          </select>
+        </div>
+      </div>`
   }
 
   // ----- Shared With Me -----
