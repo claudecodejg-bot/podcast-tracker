@@ -91,6 +91,8 @@ export async function initNav(activePage) {
     loadUnreadCount()
     // Inject Profile link into nav if not already there
     injectProfileLink()
+    // Inject Admin link for admin users
+    injectAdminLink()
   } else {
     authBtn.textContent = 'Sign In'
     authBtn.addEventListener('click', () => { window.location.href = 'login.html' })
@@ -103,6 +105,27 @@ function injectProfileLink() {
   if (!navCenter || navCenter.querySelector('[data-page="profile"]')) return
   const li = document.createElement('li')
   li.innerHTML = `<a href="profile.html" data-page="profile">Profile</a>`
+  navCenter.appendChild(li)
+}
+
+/** Adds an "Admin" item to the nav center list for admin users. */
+async function injectAdminLink() {
+  const navCenter = document.querySelector('.nav-center')
+  if (!navCenter || navCenter.querySelector('[data-page="admin"]')) return
+
+  const session = await getSession()
+  if (!session) return
+
+  const { data: user } = await supabase
+    .from('users')
+    .select('is_admin')
+    .eq('auth_id', session.user.id)
+    .single()
+
+  if (!user?.is_admin) return
+
+  const li = document.createElement('li')
+  li.innerHTML = `<a href="admin.html" data-page="admin">Admin</a>`
   navCenter.appendChild(li)
 }
 
