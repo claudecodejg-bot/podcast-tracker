@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Profile — Pod Tracker</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<nav>
+  <a href="index.html" class="nav-brand">🎙️ <span>Pod</span>Tracker</a>
+  <ul class="nav-center">
+    <li><a href="index.html"   data-page="home">Home</a></li>
+    <li><a href="browse.html"  data-page="browse">Browse</a></li>
+    <li><a href="library.html" data-page="library">My Library</a></li>
+  </ul>
+  <div class="nav-right">
+    <div class="nav-notification">
+      <a href="library.html#shared" title="Notifications">🔔</a>
+      <span id="nav-notification-badge" class="hidden"></span>
+    </div>
+    <button id="nav-hamburger" aria-label="Menu">
+      <span></span><span></span><span></span>
+    </button>
+    <button id="nav-auth-btn"></button>
+  </div>
+</nav>
+
+<main>
+  <div id="profile-loading" class="loading-state" style="padding:4rem 0">
+    <div class="spinner"></div> Loading profile…
+  </div>
+
+  <div id="profile-wrap" class="hidden">
+
+    <!-- Profile Hero -->
+    <div class="profile-hero">
+      <div class="profile-avatar" id="profile-avatar">🎧</div>
+      <div class="profile-meta">
+        <h1 id="profile-name"></h1>
+        <div class="profile-stats" id="profile-stats"></div>
+        <div id="own-profile-actions" class="hidden" style="margin-top:.75rem">
+          <a href="library.html" class="btn btn-sm btn-outline">My Library</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="container">
+
+      <!-- 4 Favorite Podcasts -->
+      <div class="mt-3 mb-2">
+        <div class="section-header">
+          <span class="section-title">❤️ Favorite Podcasts</span>
+          <button id="edit-faves-btn" class="btn btn-sm btn-outline hidden">Edit</button>
+        </div>
+        <div id="fave-grid" class="fave-grid">
+          <!-- 4 slots filled by JS -->
+        </div>
+      </div>
+
+      <!-- Neon divider -->
+      <div class="neon-divider"></div>
+
+      <!-- Recent Activity tabs -->
+      <div class="mt-3">
+        <div class="tab-bar">
+          <button class="tab-btn active" data-tab="recent">Recent</button>
+          <button class="tab-btn" data-tab="ratings">Ratings</button>
+          <button class="tab-btn" data-tab="reviews">Reviews</button>
+          <button class="tab-btn" data-tab="lists">Lists</button>
+        </div>
+
+        <!-- Recent tab -->
+        <div id="tab-recent" class="tab-content">
+          <div id="recent-list" style="display:flex;flex-direction:column;gap:.6rem;margin-top:1rem">
+            <div class="loading-state"><div class="spinner"></div></div>
+          </div>
+        </div>
+
+        <!-- Ratings tab -->
+        <div id="tab-ratings" class="tab-content hidden">
+          <div class="ratings-header" style="margin-top:1rem">
+            <div id="avg-rating-display" class="avg-rating-block"></div>
+            <div id="rating-histogram" class="rating-histogram"></div>
+          </div>
+          <div id="ratings-list" style="display:flex;flex-direction:column;gap:.6rem;margin-top:1.5rem">
+            <div class="loading-state"><div class="spinner"></div></div>
+          </div>
+        </div>
+
+        <!-- Reviews tab -->
+        <div id="tab-reviews" class="tab-content hidden">
+          <div id="reviews-list" style="display:flex;flex-direction:column;gap:1rem;margin-top:1rem">
+            <div class="loading-state"><div class="spinner"></div></div>
+          </div>
+        </div>
+
+        <!-- Lists tab -->
+        <div id="tab-lists" class="tab-content hidden">
+          <div id="lists-grid" class="grid-4" style="margin-top:1rem">
+            <div class="loading-state"><div class="spinner"></div></div>
+          </div>
+          <div id="new-list-btn-wrap" class="hidden" style="margin-top:1rem">
+            <button class="btn btn-primary" id="new-list-btn">+ Create List</button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</main>
+
+<!-- Edit Favorites Modal -->
+<div id="faves-modal" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Edit Favorite Podcasts</h3>
+      <button class="modal-close" id="faves-modal-close">✕</button>
+    </div>
+    <p class="text-muted text-sm" style="margin:.5rem 0 1rem">Choose up to 4 podcasts that define your taste.</p>
+    <div id="faves-slot-list">
+      <!-- 4 slots rendered by JS -->
+    </div>
+    <div style="margin-top:1.25rem;display:flex;gap:.75rem;justify-content:flex-end">
+      <button class="btn btn-outline" id="faves-cancel-btn">Cancel</button>
+      <button class="btn btn-primary" id="faves-save-btn">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- New List Modal -->
+<div id="list-modal" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>New Curated List</h3>
+      <button class="modal-close" id="list-modal-close">✕</button>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:.75rem;margin-top:.75rem">
+      <input type="text" id="list-title-input" class="search-input" placeholder="List title…" style="width:100%;box-sizing:border-box">
+      <textarea id="list-desc-input" class="search-input" placeholder="Optional description…" style="width:100%;box-sizing:border-box;min-height:80px;resize:vertical"></textarea>
+      <label class="checkbox-row">
+        <input type="checkbox" id="list-public-check" checked>
+        <span>Public (visible to group)</span>
+      </label>
+    </div>
+    <div style="margin-top:1.25rem;display:flex;gap:.75rem;justify-content:flex-end">
+      <button class="btn btn-outline" id="list-cancel-btn">Cancel</button>
+      <button class="btn btn-primary" id="list-create-btn">Create</button>
+    </div>
+  </div>
+</div>
+
+<footer>Pod Tracker &copy; <span id="footer-year"></span></footer>
+
+<script type="module">
+  import { supabase }           from './js/supabase-client.js'
+  import { initNav, getCurrentUser } from './js/auth.js'
+  import { renderStars, renderHistogram, formatRating } from './js/ratings.js'
+  import { platformBadge, formatDate } from './js/search.js'
+
+  document.getElementById('footer-year').textContent = new Date().getFullYear()
+  document.getElementById('nav-hamburger').addEventListener('click', () => {
+    document.querySelector('.nav-center').classList.toggle('open')
+  })
+
+  // --- Tabs ---
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'))
+      document.querySelectorAll('.tab-content').forEach(t => t.classList.add('hidden'))
+      btn.classList.add('active')
+      document.getElementById(`tab-${btn.dataset.tab}`).classList.remove('hidden')
+    })
+  })
+
+  function escHtml(str) {
+    return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
+  }
+
+  // --- Determine whose profile to show ---
+  const params  = new URLSearchParams(location.search)
+  let   userId  = params.get('user')   // UUID from users table
+  let   me      = null
+  let   isOwn   = false
+
+  async function init() {
+    await initNav(null)
+    me = await getCurrentUser()
+
+    // If no ?user param, show own profile (requires login)
+    if (!userId) {
+      if (!me) { location.href = 'login.html?next=' + encodeURIComponent(location.href); return }
+      userId = me.id
+    }
+
+    isOwn = me && me.id === userId
+
+    await loadProfile()
+  }
+
+  async function loadProfile() {
+    // Fetch user record
+    const { data: user } = await supabase
+      .from('users')
+      .select('id, full_name, email, created_at')
+      .eq('id', userId)
+      .maybeSingle()
+
+    if (!user) {
+      document.getElementById('profile-loading').innerHTML = `<div class="empty-state"><h3>User not found</h3></div>`
+      return
+    }
+
+    document.getElementById('profile-loading').classList.add('hidden')
+    document.getElementById('profile-wrap').classList.remove('hidden')
+    document.title = `${user.full_name} — Pod Tracker`
+
+    // Avatar initials
+    const initials = user.full_name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
+    const avatarEl = document.getElementById('profile-avatar')
+    avatarEl.textContent = initials
+
+    document.getElementById('profile-name').textContent = user.full_name
+
+    if (isOwn) {
+      document.getElementById('own-profile-actions').classList.remove('hidden')
+    }
+
+    await Promise.all([
+      loadStats(user),
+      loadFavorites(),
+      loadRecentActivity(),
+      loadRatings(),
+      loadReviews(),
+      loadLists()
+    ])
+
+    if (isOwn) {
+      document.getElementById('edit-faves-btn').classList.remove('hidden')
+      document.getElementById('new-list-btn-wrap').classList.remove('hidden')
+      initFavesModal()
+      initListModal()
+    }
+  }
+
+  async function loadStats(user) {
+    const [{ count: epCount }, { count: ratCount }, { count: subCount }] = await Promise.all([
+      supabase.from('listening_log').select('*', { count: 'exact', head: true }).eq('user_id', userId),
+      supabase.from('episode_ratings').select('*', { count: 'exact', head: true }).eq('user_id', userId),
+      supabase.from('subscriptions').select('*', { count: 'exact', head: true }).eq('user_id', userId)
+    ])
+
+    // Average rating
+    const { data: ratings } = await supabase
+      .from('episode_ratings')
+      .select('rating')
+      .eq('user_id', userId)
+
+    let avgRating = null
+    if (ratings?.length) {
+      avgRating = ratings.reduce((s, r) => s + Number(r.rating), 0) / ratings.length
+      avgRating = Math.round(avgRating * 10) / 10
+    }
+
+    document.getElementById('profile-stats').innerHTML = `
+      <span class="stat-chip">🎧 ${epCount || 0} listened</span>
+      <span class="stat-chip">⭐ ${avgRating ?? '—'} avg rating</span>
+      <span class="stat-chip">📻 ${subCount || 0} subscribed</span>
+      <span class="stat-chip">✍️ ${ratCount || 0} rated</span>
+    `
+  }
+
+  async function loadFavorites() {
+    const { data: faves } = await supabase
+      .from('favorite_podcasts')
+      .select('slot, podcasts(id, title, artwork_url)')
+      .eq('user_id', userId)
+      .order('slot')
+
+    const grid = document.getElementById('fave-grid')
+    const slots = [1, 2, 3, 4]
+    const map   = {}
+    faves?.forEach(f => { map[f.slot] = f.podcasts })
+
+    grid.innerHTML = slots.map(s => {
+      const pod = map[s]
+      if (pod) {
+        return `
+          <a href="podcast.html?id=${pod.id}" class="fave-slot" title="${escHtml(pod.title)}">
+            ${pod.artwork_url
+              ? `<img src="${escHtml(pod.artwork_url)}" alt="${escHtml(pod.title)}" loading="lazy">`
+              : `<div class="fave-placeholder">🎙️</div>`}
+          </a>`
+      }
+      return `<div class="fave-slot fave-slot-empty${isOwn ? ' fave-slot-clickable' : ''}" data-slot="${s}">
+        ${isOwn ? '<span>+</span>' : '<span style="opacity:.3">—</span>'}
+      </div>`
+    }).join('')
+
+    if (isOwn) {
+      grid.querySelectorAll('.fave-slot-clickable').forEach(el => {
+        el.addEventListener('click', () => openFaveSlot(Number(el.dataset.slot)))
+      })
+    }
+  }
+
+  async function loadRecentActivity() {
+    const { data: entries } = await supabase
+      .from('listening_log')
+      .select(`
+        id, listened_on, review, rating,
+        episodes(id, title, podcasts(id, title, artwork_url, platform))
+      `)
+      .eq('user_id', userId)
+      .order('listened_on', { ascending: false })
+      .limit(20)
+
+    const list = document.getElementById('recent-list')
+    if (!entries?.length) {
+      list.innerHTML = `<div class="empty-state">
+        <div class="empty-icon">🎙️</div>
+        <h3>No listening history yet</h3>
+        ${isOwn ? '<p>Log episodes from the episode page to build your diary.</p>' : ''}
+      </div>`
+      return
+    }
+
+    list.innerHTML = entries.map(e => {
+      const ep = e.episodes
+      const p  = ep?.podcasts
+      return `
+        <a href="episode.html?id=${ep.id}" class="diary-entry" style="text-decoration:none">
+          ${p?.artwork_url
+            ? `<img class="trending-art" src="${escHtml(p.artwork_url)}" alt="" loading="lazy">`
+            : '<div class="trending-art" style="display:flex;align-items:center;justify-content:center;font-size:1.4rem">🎙️</div>'}
+          <div class="diary-meta">
+            <div class="diary-date">${formatDate(e.listened_on)}</div>
+            <div class="trending-title">${escHtml(ep?.title || '')}</div>
+            <div class="trending-podcast">${escHtml(p?.title || '')}</div>
+            ${e.rating ? `<div class="diary-rating">${renderStars(e.rating, '.9rem')}</div>` : ''}
+            ${e.review ? `<div class="diary-review">${escHtml(e.review)}</div>` : ''}
+          </div>
+        </a>`
+    }).join('')
+  }
+
+  async function loadRatings() {
+    const { data: ratings } = await supabase
+      .from('episode_ratings')
+      .select(`rating, episodes(id, title, podcasts(id, title, artwork_url, platform))`)
+      .eq('user_id', userId)
+      .order('updated_at', { ascending: false })
+      .limit(50)
+
+    // Histogram
+    const histogram = {}
+    let total = 0
+    ratings?.forEach(r => {
+      const v = Number(r.rating)
+      histogram[v] = (histogram[v] || 0) + 1
+      total += v
+    })
+    const avgRating = ratings?.length ? Math.round((total / ratings.length) * 10) / 10 : null
+
+    const avgBlock = document.getElementById('avg-rating-display')
+    if (avgRating) {
+      avgBlock.innerHTML = `
+        <div class="avg-num">${avgRating}</div>
+        <div>${renderStars(avgRating, '1.2rem')}</div>
+        <div class="text-muted text-sm">${ratings.length} rating${ratings.length !== 1 ? 's' : ''}</div>`
+    } else {
+      avgBlock.innerHTML = `<div class="text-muted">No ratings yet</div>`
+    }
+
+    if (Object.keys(histogram).length) {
+      renderHistogram(document.getElementById('rating-histogram'), histogram, ratings.length)
+    }
+
+    const list = document.getElementById('ratings-list')
+    if (!ratings?.length) {
+      list.innerHTML = `<div class="empty-state"><h3>No ratings yet</h3></div>`
+      return
+    }
+
+    list.innerHTML = ratings.map(r => {
+      const ep = r.episodes
+      const p  = ep?.podcasts
+      return `
+        <a href="episode.html?id=${ep.id}" class="trending-card" style="text-decoration:none">
+          ${p?.artwork_url
+            ? `<img class="trending-art" src="${escHtml(p.artwork_url)}" alt="" loading="lazy">`
+            : '<div class="trending-art" style="display:flex;align-items:center;justify-content:center;font-size:1.4rem">🎙️</div>'}
+          <div class="trending-info">
+            <div class="trending-title">${escHtml(ep?.title || '')}</div>
+            <div class="trending-podcast">${escHtml(p?.title || '')}</div>
+          </div>
+          <div>${renderStars(r.rating, '1rem')}</div>
+        </a>`
+    }).join('')
+  }
+
+  async function loadReviews() {
+    const { data: reviews } = await supabase
+      .from('episode_reviews')
+      .select(`
+        id, body, rating, created_at,
+        episodes(id, title, podcasts(id, title, artwork_url, platform))
+      `)
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(20)
+
+    const list = document.getElementById('reviews-list')
+    if (!reviews?.length) {
+      list.innerHTML = `<div class="empty-state"><h3>No reviews yet</h3></div>`
+      return
+    }
+
+    list.innerHTML = reviews.map(r => {
+      const ep = r.episodes
+      const p  = ep?.podcasts
+      return `
+        <div class="review-card">
+          <div class="review-card-header">
+            ${p?.artwork_url
+              ? `<img class="trending-art" src="${escHtml(p.artwork_url)}" alt="" loading="lazy" style="border-radius:4px">`
+              : ''}
+            <div>
+              <a href="episode.html?id=${ep.id}" class="review-ep-link">${escHtml(ep?.title || '')}</a>
+              <div class="text-muted text-sm">${escHtml(p?.title || '')} · ${formatDate(r.created_at)}</div>
+              ${r.rating ? renderStars(r.rating, '.9rem') : ''}
+            </div>
+          </div>
+          <p class="review-body">${escHtml(r.body)}</p>
+        </div>`
+    }).join('')
+  }
+
+  async function loadLists() {
+    const { data: lists } = await supabase
+      .from('curated_lists')
+      .select('id, title, description, is_public, created_at')
+      .eq('user_id', userId)
+      .order('updated_at', { ascending: false })
+
+    const grid = document.getElementById('lists-grid')
+    if (!lists?.length) {
+      grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1">
+        <div class="empty-icon">📋</div>
+        <h3>No lists yet</h3>
+        ${isOwn ? '<p>Create a curated list of your favorite episodes or podcasts.</p>' : ''}
+      </div>`
+      return
+    }
+
+    grid.innerHTML = lists.map(l => `
+      <a href="list.html?id=${l.id}" class="podcast-card" style="text-decoration:none">
+        <div class="podcast-card-art-placeholder" style="font-size:2rem">📋</div>
+        <div class="podcast-card-body">
+          <div class="podcast-card-title">${escHtml(l.title)}</div>
+          <div class="podcast-card-author text-muted">${escHtml(l.description || '')}</div>
+          <div class="podcast-card-footer">
+            <span class="badge badge-platform">${l.is_public ? 'Public' : '🔒 Private'}</span>
+            <span class="text-muted text-sm">${formatDate(l.created_at)}</span>
+          </div>
+        </div>
+      </a>`).join('')
+  }
+
+  // ---- Edit Favorites Modal ----
+  let pendingFaves = {}
+
+  function initFavesModal() {
+    document.getElementById('edit-faves-btn').addEventListener('click', openFavesModal)
+    document.getElementById('faves-modal-close').addEventListener('click', closeFavesModal)
+    document.getElementById('faves-cancel-btn').addEventListener('click', closeFavesModal)
+    document.getElementById('faves-save-btn').addEventListener('click', saveFaves)
+  }
+
+  function openFaveSlot(slot) {
+    pendingFaves = {}
+    openFavesModal(null, slot)
+  }
+
+  async function openFavesModal(e, focusSlot = null) {
+    // Load current faves
+    const { data: faves } = await supabase
+      .from('favorite_podcasts')
+      .select('slot, podcast_id, podcasts(id, title, artwork_url)')
+      .eq('user_id', me.id)
+      .order('slot')
+
+    faves?.forEach(f => { pendingFaves[f.slot] = { id: f.podcast_id, title: f.podcasts?.title, artwork_url: f.podcasts?.artwork_url } })
+
+    // Load all subscribed podcasts as choices
+    const { data: subs } = await supabase
+      .from('subscriptions')
+      .select('podcasts(id, title, artwork_url)')
+      .eq('user_id', me.id)
+      .order('created_at', { ascending: false })
+
+    const choices = subs?.map(s => s.podcasts).filter(Boolean) || []
+
+    const container = document.getElementById('faves-slot-list')
+    container.innerHTML = [1,2,3,4].map(slot => {
+      const cur = pendingFaves[slot]
+      return `
+        <div class="fave-edit-row" data-slot="${slot}">
+          <span class="fave-slot-num">${slot}</span>
+          <div class="fave-slot-preview">
+            ${cur
+              ? `<img src="${escHtml(cur.artwork_url || '')}" alt="" style="width:40px;height:40px;object-fit:cover;border-radius:4px">
+                 <span>${escHtml(cur.title)}</span>`
+              : `<span class="text-muted">— empty —</span>`}
+          </div>
+          <select class="fave-slot-select" data-slot="${slot}">
+            <option value="">— remove —</option>
+            ${choices.map(p => `<option value="${p.id}" ${cur?.id === p.id ? 'selected' : ''}>${escHtml(p.title)}</option>`).join('')}
+          </select>
+        </div>`
+    }).join('')
+
+    document.getElementById('faves-modal').classList.remove('hidden')
+  }
+
+  function closeFavesModal() {
+    document.getElementById('faves-modal').classList.add('hidden')
+    pendingFaves = {}
+  }
+
+  async function saveFaves() {
+    const selects = document.querySelectorAll('.fave-slot-select')
+    const ops = []
+    selects.forEach(sel => {
+      const slot = Number(sel.dataset.slot)
+      const podId = sel.value || null
+      if (podId) {
+        ops.push(supabase.from('favorite_podcasts').upsert(
+          { user_id: me.id, podcast_id: podId, slot },
+          { onConflict: 'user_id,slot' }
+        ))
+      } else {
+        ops.push(supabase.from('favorite_podcasts').delete().eq('user_id', me.id).eq('slot', slot))
+      }
+    })
+    await Promise.all(ops)
+    closeFavesModal()
+    await loadFavorites()
+  }
+
+  // ---- New List Modal ----
+  function initListModal() {
+    document.getElementById('new-list-btn').addEventListener('click', () => {
+      document.getElementById('list-modal').classList.remove('hidden')
+    })
+    document.getElementById('list-modal-close').addEventListener('click', () => document.getElementById('list-modal').classList.add('hidden'))
+    document.getElementById('list-cancel-btn').addEventListener('click', () => document.getElementById('list-modal').classList.add('hidden'))
+    document.getElementById('list-create-btn').addEventListener('click', createList)
+  }
+
+  async function createList() {
+    const title = document.getElementById('list-title-input').value.trim()
+    if (!title) return
+
+    const { data, error } = await supabase.from('curated_lists').insert({
+      user_id:     me.id,
+      title,
+      description: document.getElementById('list-desc-input').value.trim() || null,
+      is_public:   document.getElementById('list-public-check').checked
+    }).select('id').single()
+
+    if (!error && data) {
+      document.getElementById('list-modal').classList.add('hidden')
+      location.href = `list.html?id=${data.id}`
+    }
+  }
+
+  init()
+</script>
+</body>
+</html>

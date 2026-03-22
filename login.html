@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sign In — Pod Tracker</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<nav>
+  <a href="index.html" class="nav-brand">🎙️ <span>Pod</span>Tracker</a>
+  <ul class="nav-links"></ul>
+  <div class="nav-right">
+    <button id="nav-auth-btn" class="hidden"></button>
+  </div>
+</nav>
+
+<main>
+  <div class="login-wrapper">
+    <div class="login-card">
+      <div class="login-logo">
+        <h1>🎙️ Pod Tracker</h1>
+        <p id="login-subtitle">Sign in to access your library</p>
+      </div>
+
+      <div id="login-alert" class="alert hidden"></div>
+
+      <form id="login-form">
+        <div class="form-group">
+          <label for="email">Email address</label>
+          <input type="email" id="email" placeholder="you@example.com" required autocomplete="email">
+        </div>
+        <div class="form-group">
+          <label for="password">Password</label>
+          <input type="password" id="password" placeholder="••••••••" required autocomplete="current-password">
+        </div>
+        <button type="submit" class="btn btn-primary btn-full" id="login-btn">Sign In</button>
+      </form>
+
+      <p style="margin-top:0.75rem;text-align:center;">
+        <button id="forgot-btn" style="background:none;border:none;color:var(--accent);font-size:0.85rem;cursor:pointer;text-decoration:underline;padding:0;">
+          Forgot password?
+        </button>
+      </p>
+
+      <form id="reset-form" class="hidden" style="margin-top:1rem;">
+        <div class="form-group">
+          <label for="reset-email">Your email address</label>
+          <input type="email" id="reset-email" placeholder="you@example.com" required autocomplete="email">
+        </div>
+        <button type="submit" class="btn btn-primary btn-full" id="reset-btn">Send Reset Email</button>
+        <p style="margin-top:0.5rem;text-align:center;">
+          <button id="back-btn" type="button" style="background:none;border:none;color:var(--gray-600);font-size:0.85rem;cursor:pointer;text-decoration:underline;padding:0;">
+            Back to sign in
+          </button>
+        </p>
+      </form>
+
+      <p style="margin-top:1rem;font-size:0.82rem;color:var(--gray-600);text-align:center;">
+        Don't have an account? Contact your group admin.
+      </p>
+    </div>
+  </div>
+</main>
+
+<footer>Pod Tracker &copy; <span id="footer-year"></span></footer>
+
+<script type="module">
+  import { supabase } from './js/supabase-client.js'
+  import { getSession } from './js/auth.js'
+
+  document.getElementById('footer-year').textContent = new Date().getFullYear()
+
+  getSession().then(session => {
+    if (session) window.location.href = 'library.html'
+  })
+
+  const alertEl   = document.getElementById('login-alert')
+  const loginForm = document.getElementById('login-form')
+  const resetForm = document.getElementById('reset-form')
+
+  function showAlert(msg, type = 'error') {
+    alertEl.textContent = msg
+    alertEl.className = `alert alert-${type}`
+    alertEl.classList.remove('hidden')
+  }
+
+  document.getElementById('forgot-btn').addEventListener('click', () => {
+    loginForm.classList.add('hidden')
+    resetForm.classList.remove('hidden')
+    alertEl.classList.add('hidden')
+    document.getElementById('login-subtitle').textContent = 'Reset your password'
+  })
+
+  document.getElementById('back-btn').addEventListener('click', () => {
+    resetForm.classList.add('hidden')
+    loginForm.classList.remove('hidden')
+    alertEl.classList.add('hidden')
+    document.getElementById('login-subtitle').textContent = 'Sign in to access your library'
+  })
+
+  loginForm.addEventListener('submit', async (e) => {
+    e.preventDefault()
+    alertEl.classList.add('hidden')
+    const btn = document.getElementById('login-btn')
+    btn.disabled = true
+    btn.textContent = 'Signing in…'
+
+    const email    = document.getElementById('email').value.trim()
+    const password = document.getElementById('password').value
+
+    const { error } = await supabase.auth.signInWithPassword({ email, password })
+
+    if (error) {
+      showAlert('Incorrect email or password. Please try again.')
+      btn.disabled = false
+      btn.textContent = 'Sign In'
+      return
+    }
+
+    window.location.href = 'library.html'
+  })
+
+  resetForm.addEventListener('submit', async (e) => {
+    e.preventDefault()
+    const btn = document.getElementById('reset-btn')
+    btn.disabled = true
+    btn.textContent = 'Sending…'
+
+    const email = document.getElementById('reset-email').value.trim()
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: window.location.origin + window.location.pathname.replace('login.html', '') + 'login.html'
+    })
+
+    if (error) {
+      showAlert('Could not send reset email. Please try again.')
+    } else {
+      showAlert('Reset email sent! Check your inbox.', 'success')
+    }
+    btn.disabled = false
+    btn.textContent = 'Send Reset Email'
+  })
+</script>
+</body>
+</html>

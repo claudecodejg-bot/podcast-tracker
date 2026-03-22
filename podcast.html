@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Podcast — Pod Tracker</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<nav>
+  <a href="index.html" class="nav-brand">🎙️ <span>Pod</span>Tracker</a>
+  <ul class="nav-center">
+    <li><a href="index.html"   data-page="home">Home</a></li>
+    <li><a href="browse.html"  data-page="browse">Browse</a></li>
+    <li><a href="library.html" data-page="library">My Library</a></li>
+  </ul>
+  <div class="nav-right">
+    <div class="nav-notification">
+      <a href="library.html#shared" title="Notifications">🔔</a>
+      <span id="nav-notification-badge" class="hidden"></span>
+    </div>
+    <button id="nav-hamburger" aria-label="Menu">
+      <span></span><span></span><span></span>
+    </button>
+    <button id="nav-auth-btn"></button>
+  </div>
+</nav>
+
+<main>
+  <div class="container" id="podcast-container">
+    <div class="loading-state"><div class="spinner"></div> Loading podcast…</div>
+  </div>
+</main>
+
+<footer>Pod Tracker &copy; <span id="footer-year"></span></footer>
+<div id="share-modal-container"></div>
+
+<script type="module">
+  import { supabase } from './js/supabase-client.js'
+  import { initNav, getCurrentUser } from './js/auth.js'
+  import { platformBadge, rankBadge, formatDate, formatDuration, formatCount } from './js/search.js'
+  import { initShareModal, openShareModal } from './js/share.js'
+
+  document.getElementById('footer-year').textContent = new Date().getFullYear()
+  document.getElementById('nav-hamburger').addEventListener('click', () => {
+    document.querySelector('.nav-center').classList.toggle('open')
+  })
+
+  const params    = new URLSearchParams(location.search)
+  const podcastId = params.get('id')
+  if (!podcastId) { window.location.href = 'browse.html'; }
+
+  let currentUser  = null
+  let podcast      = null
+  let episodes     = []
+  let isSubscribed = false
+  let isPodLiked   = false
+  let podLikeCount = 0
+  let podLikers    = []
+  let sortMode     = 'newest'  // 'newest' | 'top'
+
+  async function init() {
+    await initNav()
+    currentUser = await getCurrentUser()
+    if (currentUser) await initShareModal()
+
+    const [podRes, epRes, likersRes] = await Promise.all([
+      supabase.from('podcasts').select(`
+        *, categories(name, icon),
+        podcast_likes(user_id, users(full_name))
+      `).eq('id', podcastId).single(),
+
+      supabase.from('episodes').select('*')
+        .eq('podcast_id', podcastId)
+        .order('published_at', { ascending: false }),
+
+      supabase.from('podcast_likes').select('users(full_name)')
+        .eq('podcast_id', podcastId)
+        .limit(5)
+    ])
+
+    if (podRes.error || !podRes.data) {
+      document.getElementById('podcast-container').innerHTML =
+        '<div class="empty-state"><div class="empty-icon">😕</div><h3>Podcast not found</h3></div>'
+      return
+    }
+
+    podcast    = podRes.data
+    episodes   = epRes.data || []
+    podLikers  = (likersRes.data || []).map(l => l.users?.full_name).filter(Boolean)
+    podLikeCount = podcast.podcast_likes?.length || 0
+
+    if (currentUser) {
+      isSubscribed = podcast.podcast_likes?.some(l => l.user_id === currentUser.id) === true
+      // Check subscription separately (podcast_likes ≠ subscriptions)
+      const { data: sub } = await supabase.from('subscriptions')
+        .select('id').eq('user_id', currentUser.id).eq('podcast_id', podcastId).maybeSingle()
+      isSubscribed = !!sub
+
+      isPodLiked = podcast.podcast_likes?.some(l => l.user_id === currentUser.id) || false
+    }
+
+    document.title = `${podcast.title} — Pod Tracker`
+    render()
+  }
+
+  function render() {
+    const container = document.getElementById('podcast-container')
+
+    const avatarsHtml = podLikers.slice(0, 4).map(name => {
+      const initials = name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
+      return `<div class="member-avatar" title="${escHtml(name)}">${initials}</div>`
+    }).join('')
+
+    const episodeRows = sortedEpisodes().map(ep => episodeRowHTML(ep)).join('')
+    const subBtnText  = isSubscribed ? '✓ Following' : '+ Follow'
+    const subBtnClass = isSubscribed ? 'subscribed' : ''
+
+    container.innerHTML = `
+      <!-- Podcast hero -->
+      <div style="margin-top:1.5rem">
+        <a href="browse.html" class="text-muted text-sm">← Back to Browse</a>
+      </div>
+
+      <div class="podcast-hero mt-2">
+        ${podcast.artwork_url
+          ? `<img class="podcast-hero-art" src="${escHtml(podcast.artwork_url)}" alt="" loading="lazy">`
+          : `<div class="podcast-hero-art" style="display:flex;align-items:center;justify-content:center;font-size:3rem;background:var(--accent-light)">🎙️</div>`
+        }
+        <div class="podcast-hero-info">
+          <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.25rem">
+            ${platformBadge(podcast.platform)}
+            ${podcast.categories ? `<span class="badge badge-new">${podcast.categories.icon} ${escHtml(podcast.categories.name)}</span>` : ''}
+          </div>
+          <h1 class="podcast-hero-title">${escHtml(podcast.title)}</h1>
+          <p class="podcast-hero-author">${escHtml(podcast.author || '')}</p>
+          ${podcast.description
+            ? `<p class="podcast-hero-desc">${escHtml(podcast.description)}</p>`
+            : ''
+          }
+          <div class="podcast-hero-stats">
+            <span><strong>${episodes.length}</strong> episodes</span>
+            <span><strong>${podLikeCount}</strong> ❤️ likes</span>
+          </div>
+          <div class="podcast-hero-actions">
+            <button class="subscribe-btn ${subBtnClass}" id="subscribe-btn">${subBtnText}</button>
+            <button class="like-btn ${isPodLiked ? 'liked' : ''}" id="pod-like-btn">
+              <span class="heart">${isPodLiked ? '❤️' : '🤍'}</span>
+              <span id="pod-like-count">${podLikeCount}</span>
+            </button>
+            ${avatarsHtml ? `<div class="member-avatars">${avatarsHtml}</div>` : ''}
+            <button class="btn btn-secondary btn-sm" id="share-pod-btn">📤 Share</button>
+            ${podcast.website_url
+              ? `<a href="${escHtml(podcast.website_url)}" target="_blank" class="btn btn-outline btn-sm">↗ Open</a>`
+              : ''
+            }
+          </div>
+        </div>
+      </div>
+
+      <!-- Episodes -->
+      <div class="card" style="margin-top:1.5rem">
+        <div class="section-header">
+          <span class="section-title">Episodes</span>
+          <div style="display:flex;gap:0.4rem">
+            <button class="tab-btn ${sortMode==='newest'?'active':''}" id="sort-newest">Newest</button>
+            <button class="tab-btn ${sortMode==='top'?'active':''}" id="sort-top">Top Rated</button>
+          </div>
+        </div>
+        <div id="episodes-list">
+          ${episodeRows || `<div class="empty-state"><div class="empty-icon">🎙️</div><h3>No episodes yet</h3><p>Check back after the next sync</p></div>`}
+        </div>
+      </div>
+    `
+
+    // Wire buttons
+    document.getElementById('subscribe-btn').addEventListener('click', toggleSubscribe)
+    document.getElementById('pod-like-btn').addEventListener('click', togglePodcastLike)
+    document.getElementById('share-pod-btn').addEventListener('click', () => {
+      openShareModal({ podcastId: podcast.id, title: podcast.title })
+    })
+    document.getElementById('sort-newest').addEventListener('click', () => { sortMode = 'newest'; renderEpisodes() })
+    document.getElementById('sort-top').addEventListener('click', ()    => { sortMode = 'top';    renderEpisodes() })
+
+    // Episode share buttons
+    container.querySelectorAll('[data-share-episode]').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation()
+        const ep = episodes.find(e => e.id === btn.dataset.shareEpisode)
+        if (ep) openShareModal({ episodeId: ep.id, title: ep.title })
+      })
+    })
+  }
+
+  function renderEpisodes() {
+    document.getElementById('sort-newest').classList.toggle('active', sortMode === 'newest')
+    document.getElementById('sort-top').classList.toggle('active', sortMode === 'top')
+    const list = document.getElementById('episodes-list')
+    list.innerHTML = sortedEpisodes().map(ep => episodeRowHTML(ep)).join('')
+    list.querySelectorAll('[data-share-episode]').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation()
+        const ep = episodes.find(e => e.id === btn.dataset.shareEpisode)
+        if (ep) openShareModal({ episodeId: ep.id, title: ep.title })
+      })
+    })
+  }
+
+  function sortedEpisodes() {
+    if (sortMode === 'top') {
+      return [...episodes].sort((a, b) => {
+        const scoreA = a.likes_vs_avg ?? 0
+        const scoreB = b.likes_vs_avg ?? 0
+        return scoreB - scoreA
+      })
+    }
+    return episodes  // already sorted newest first from DB
+  }
+
+  function episodeRowHTML(ep) {
+    const likes = ep.platform_likes ?? 0
+    return `
+      <div class="episode-row" style="cursor:pointer" onclick="location.href='episode.html?id=${ep.id}'">
+        <div class="episode-row-main">
+          <div class="episode-row-title">${escHtml(ep.title)}</div>
+          <div class="episode-row-meta">
+            ${formatDate(ep.published_at)}
+            ${ep.duration_seconds ? ' · ' + formatDuration(ep.duration_seconds) : ''}
+            ${likes ? ` · ${formatCount(likes)} likes` : ''}
+          </div>
+        </div>
+        <div class="episode-row-actions">
+          ${rankBadge(ep.likes_vs_avg)}
+          ${ep.summary ? '<span title="AI Summary available">✨</span>' : ''}
+          <button class="btn-icon" data-share-episode="${ep.id}" title="Share">📤</button>
+        </div>
+      </div>`
+  }
+
+  async function toggleSubscribe() {
+    if (!currentUser) { window.location.href = 'login.html'; return }
+    const btn = document.getElementById('subscribe-btn')
+    btn.disabled = true
+
+    if (isSubscribed) {
+      await supabase.from('subscriptions').delete()
+        .eq('user_id', currentUser.id).eq('podcast_id', podcastId)
+      isSubscribed = false
+    } else {
+      await supabase.from('subscriptions').upsert(
+        { user_id: currentUser.id, podcast_id: podcastId },
+        { onConflict: 'user_id,podcast_id' }
+      )
+      isSubscribed = true
+    }
+
+    btn.disabled = false
+    btn.textContent = isSubscribed ? '✓ Following' : '+ Follow'
+    btn.classList.toggle('subscribed', isSubscribed)
+  }
+
+  async function togglePodcastLike() {
+    if (!currentUser) { window.location.href = 'login.html'; return }
+    const btn  = document.getElementById('pod-like-btn')
+    const heart = btn.querySelector('.heart')
+    const cnt  = document.getElementById('pod-like-count')
+    btn.disabled = true
+
+    if (isPodLiked) {
+      await supabase.from('podcast_likes').delete()
+        .eq('user_id', currentUser.id).eq('podcast_id', podcastId)
+      isPodLiked = false
+      podLikeCount = Math.max(0, podLikeCount - 1)
+    } else {
+      await supabase.from('podcast_likes').upsert(
+        { user_id: currentUser.id, podcast_id: podcastId },
+        { onConflict: 'user_id,podcast_id' }
+      )
+      isPodLiked = true
+      podLikeCount++
+    }
+
+    btn.disabled = false
+    btn.classList.toggle('liked', isPodLiked)
+    heart.textContent = isPodLiked ? '❤️' : '🤍'
+    cnt.textContent = podLikeCount
+  }
+
+  function escHtml(str) {
+    return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
+  }
+
+  init()
+</script>
+</body>
+</html>

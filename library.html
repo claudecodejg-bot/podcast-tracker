@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>My Library — Pod Tracker</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<nav>
+  <a href="index.html" class="nav-brand">🎙️ <span>Pod</span>Tracker</a>
+  <ul class="nav-center">
+    <li><a href="index.html"   data-page="home">Home</a></li>
+    <li><a href="browse.html"  data-page="browse">Browse</a></li>
+    <li><a href="library.html" data-page="library">My Library</a></li>
+  </ul>
+  <div class="nav-right">
+    <div class="nav-notification">
+      <a href="library.html#shared" id="notif-bell" title="Notifications">🔔</a>
+      <span id="nav-notification-badge" class="hidden"></span>
+    </div>
+    <button id="nav-hamburger" aria-label="Menu">
+      <span></span><span></span><span></span>
+    </button>
+    <button id="nav-auth-btn"></button>
+  </div>
+</nav>
+
+<main>
+  <div class="page-header">
+    <h1 class="page-title">My Library</h1>
+    <p class="page-subtitle">Your subscriptions and shared episodes</p>
+  </div>
+
+  <div class="container">
+    <!-- Tabs -->
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="feed">Latest Episodes</button>
+      <button class="tab-btn" data-tab="podcasts">Following</button>
+      <button class="tab-btn" data-tab="diary">Diary</button>
+      <button class="tab-btn" data-tab="queue">Queue</button>
+      <button class="tab-btn" data-tab="shared" id="shared-tab-btn">Shared <span id="shared-badge" class="badge badge-new hidden"></span></button>
+    </div>
+
+    <!-- Feed tab -->
+    <div id="tab-feed">
+      <div id="feed-list">
+        <div class="loading-state"><div class="spinner"></div> Loading episodes…</div>
+      </div>
+    </div>
+
+    <!-- Following tab -->
+    <div id="tab-podcasts" class="hidden">
+      <div id="podcasts-list">
+        <div class="loading-state"><div class="spinner"></div> Loading subscriptions…</div>
+      </div>
+    </div>
+
+    <!-- Diary tab -->
+    <div id="tab-diary" class="hidden">
+      <div class="diary-controls" style="display:flex;justify-content:space-between;align-items:center;margin:.75rem 0">
+        <span class="text-muted text-sm">Your listening history, newest first</span>
+        <a href="profile.html" class="btn btn-sm btn-outline">View Profile →</a>
+      </div>
+      <div id="diary-list" style="display:flex;flex-direction:column;gap:.6rem">
+        <div class="loading-state"><div class="spinner"></div></div>
+      </div>
+    </div>
+
+    <!-- Queue tab -->
+    <div id="tab-queue" class="hidden">
+      <div class="diary-controls" style="display:flex;justify-content:space-between;align-items:center;margin:.75rem 0">
+        <span class="text-muted text-sm">Episodes and podcasts you want to listen to</span>
+      </div>
+      <div id="queue-list" style="display:flex;flex-direction:column;gap:.6rem">
+        <div class="loading-state"><div class="spinner"></div></div>
+      </div>
+    </div>
+
+    <!-- Shared With Me tab -->
+    <div id="tab-shared" class="hidden">
+      <div id="shared-list">
+        <div class="loading-state"><div class="spinner"></div> Loading shared items…</div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<footer>Pod Tracker &copy; <span id="footer-year"></span></footer>
+<div id="share-modal-container"></div>
+
+<script type="module">
+  import { supabase } from './js/supabase-client.js'
+  import { requireLogin, getCurrentUser, initNav } from './js/auth.js'
+  import { platformBadge, rankBadge, formatDate, formatDuration, formatCount } from './js/search.js'
+  import { initShareModal, openShareModal } from './js/share.js'
+  import { renderStars, getMyLog, getMyQueue, removeFromQueue } from './js/ratings.js'
+
+  document.getElementById('footer-year').textContent = new Date().getFullYear()
+  document.getElementById('nav-hamburger').addEventListener('click', () => {
+    document.querySelector('.nav-center').classList.toggle('open')
+  })
+
+  let currentUser = null
+
+  async function init() {
+    const session = await requireLogin()
+    if (!session) return
+
+    await initNav('library')
+    currentUser = await getCurrentUser()
+    await initShareModal()
+
+    // Switch to correct tab based on URL hash
+    const hash = location.hash.replace('#','')
+    if (['shared','diary','queue','podcasts'].includes(hash)) {
+      switchTab(hash)
+    }
+
+    await Promise.all([loadFeed(), loadPodcasts(), loadShared(), loadDiary(), loadQueue()])
+  }
+
+  // ----- Tab switching -----
+  document.querySelectorAll('.tab-btn[data-tab]').forEach(btn => {
+    btn.addEventListener('click', () => switchTab(btn.dataset.tab))
+  })
+
+  function switchTab(name) {
+    document.querySelectorAll('.tab-btn[data-tab]').forEach(b => b.classList.toggle('active', b.dataset.tab === name))
+    ;['feed','podcasts','diary','queue','shared'].forEach(t => {
+      document.getElementById(`tab-${t}`).classList.toggle('hidden', t !== name)
+    })
+  }
+
+  // ----- Feed (latest episodes from subscriptions) -----
+  async function loadFeed() {
+    const list = document.getElementById('feed-list')
+
+    // Get subscribed podcast IDs
+    const { data: subs } = await supabase
+      .from('subscriptions')
+      .select('podcast_id')
+      .eq('user_id', currentUser.id)
+
+    if (!subs?.length) {
+      list.innerHTML = `<div class="empty-state">
+        <div class="empty-icon">📻</div>
+        <h3>No subscriptions yet</h3>
+        <p><a href="browse.html">Browse podcasts</a> and click "Follow" to build your feed</p>
+      </div>`
+      return
+    }
+
+    const podIds = subs.map(s => s.podcast_id)
+
+    const { data: episodes } = await supabase
+      .from('episodes')
+      .select(`
+        *,
+        podcasts(id, title, artwork_url, platform, author)
+      `)
+      .in('podcast_id', podIds)
+      .order('published_at', { ascending: false })
+      .limit(50)
+
+    if (!episodes?.length) {
+      list.innerHTML = `<div class="empty-state">
+        <div class="empty-icon">🎙️</div>
+        <h3>No episodes yet</h3>
+        <p>Episodes will appear here after the next sync</p>
+      </div>`
+      return
+    }
+
+    // Get user's episode likes
+    const epIds = episodes.map(e => e.id)
+    const { data: myLikes } = await supabase
+      .from('episode_likes')
+      .select('episode_id')
+      .eq('user_id', currentUser.id)
+      .in('episode_id', epIds)
+
+    const likedSet = new Set((myLikes || []).map(l => l.episode_id))
+
+    list.innerHTML = `<div class="card" style="padding:0">` +
+      episodes.map(ep => feedEpisodeHTML(ep, likedSet.has(ep.id))).join('') +
+      `</div>`
+
+    // Wire like buttons
+    list.querySelectorAll('[data-like-ep]').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation()
+        await toggleEpLike(btn)
+      })
+    })
+
+    // Wire share buttons
+    list.querySelectorAll('[data-share-ep]').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation()
+        const ep = episodes.find(ep => ep.id === btn.dataset.shareEp)
+        if (ep) openShareModal({ episodeId: ep.id, title: ep.title })
+      })
+    })
+  }
+
+  function feedEpisodeHTML(ep, isLiked) {
+    const p = ep.podcasts
+    return `
+      <div class="episode-row" style="cursor:pointer" onclick="location.href='episode.html?id=${ep.id}'">
+        ${p?.artwork_url
+          ? `<img src="${escHtml(p.artwork_url)}" alt="" style="width:44px;height:44px;border-radius:6px;object-fit:cover;flex-shrink:0">`
+          : '<div style="width:44px;height:44px;border-radius:6px;background:var(--accent-light);display:flex;align-items:center;justify-content:center;font-size:1.2rem;flex-shrink:0">🎙️</div>'
+        }
+        <div class="episode-row-main">
+          <div style="font-size:0.78rem;color:var(--gray-600);margin-bottom:0.1rem">${escHtml(p?.title || '')}</div>
+          <div class="episode-row-title">${escHtml(ep.title)}</div>
+          <div class="episode-row-meta">
+            ${formatDate(ep.published_at)}
+            ${ep.duration_seconds ? ' · ' + formatDuration(ep.duration_seconds) : ''}
+            ${ep.summary ? ' · ✨ Summary' : ''}
+          </div>
+        </div>
+        <div class="episode-row-actions">
+          ${rankBadge(ep.likes_vs_avg)}
+          <button class="like-btn btn-sm ${isLiked?'liked':''}" data-like-ep="${ep.id}" data-liked="${isLiked}">
+            ${isLiked?'❤️':'🤍'}
+          </button>
+          <button class="btn-icon" data-share-ep="${ep.id}" title="Share">📤</button>
+        </div>
+      </div>`
+  }
+
+  async function toggleEpLike(btn) {
+    const epId   = btn.dataset.likeEp
+    const liked  = btn.dataset.liked === 'true'
+
+    if (liked) {
+      await supabase.from('episode_likes').delete()
+        .eq('user_id', currentUser.id).eq('episode_id', epId)
+      btn.dataset.liked = 'false'
+      btn.classList.remove('liked')
+      btn.innerHTML = '🤍'
+    } else {
+      await supabase.from('episode_likes').upsert(
+        { user_id: currentUser.id, episode_id: epId },
+        { onConflict: 'user_id,episode_id' }
+      )
+      btn.dataset.liked = 'true'
+      btn.classList.add('liked')
+      btn.innerHTML = '❤️'
+    }
+  }
+
+  // ----- Following (subscribed podcasts) -----
+  async function loadPodcasts() {
+    const list = document.getElementById('podcasts-list')
+
+    const { data: subs } = await supabase
+      .from('subscriptions')
+      .select(`
+        podcast_id,
+        podcasts(
+          id, title, author, artwork_url, platform,
+          podcast_likes(count)
+        )
+      `)
+      .eq('user_id', currentUser.id)
+      .order('created_at', { ascending: false })
+
+    if (!subs?.length) {
+      list.innerHTML = `<div class="empty-state">
+        <div class="empty-icon">📻</div>
+        <h3>Not following any podcasts yet</h3>
+        <p><a href="browse.html">Browse</a> to find podcasts to follow</p>
+      </div>`
+      return
+    }
+
+    list.innerHTML = `<div class="grid-3">` +
+      subs.map(s => {
+        const p = s.podcasts
+        const likes = p?.podcast_likes?.[0]?.count || 0
+        return `
+          <a href="podcast.html?id=${p.id}" class="podcast-card" style="text-decoration:none">
+            ${p.artwork_url
+              ? `<img class="podcast-card-art" src="${escHtml(p.artwork_url)}" alt="" loading="lazy">`
+              : '<div class="podcast-card-art-placeholder">🎙️</div>'
+            }
+            <div class="podcast-card-body">
+              <div class="podcast-card-title">${escHtml(p.title)}</div>
+              <div class="podcast-card-author text-muted">${escHtml(p.author || '')}</div>
+              <div class="podcast-card-footer">
+                ${platformBadge(p.platform)}
+                ${likes ? `<span class="text-muted text-sm">❤️ ${likes}</span>` : ''}
+              </div>
+            </div>
+          </a>`
+      }).join('') +
+      `</div>`
+  }
+
+  // ----- Shared With Me -----
+  async function loadShared() {
+    const list = document.getElementById('shared-list')
+
+    const { data: shares } = await supabase
+      .from('shares')
+      .select(`
+        *,
+        sender:sender_id(full_name),
+        podcasts(id, title, artwork_url),
+        episodes(id, title, podcast_id, podcasts(id, title, artwork_url))
+      `)
+      .eq('recipient_id', currentUser.id)
+      .order('created_at', { ascending: false })
+
+    if (!shares?.length) {
+      list.innerHTML = `<div class="empty-state">
+        <div class="empty-icon">💌</div>
+        <h3>Nothing shared with you yet</h3>
+        <p>When group members share podcasts or episodes, they'll appear here</p>
+      </div>`
+      return
+    }
+
+    const unreadCount = shares.filter(s => !s.read_at).length
+    if (unreadCount > 0) {
+      const badge = document.getElementById('shared-badge')
+      badge.textContent = unreadCount
+      badge.classList.remove('hidden')
+    }
+
+    list.innerHTML = `<div class="card" style="padding:0">` +
+      shares.map(s => shareItemHTML(s)).join('') +
+      `</div>`
+
+    // Mark as read on click
+    list.querySelectorAll('[data-share-id]').forEach(el => {
+      el.addEventListener('click', async () => {
+        const shareId = el.dataset.shareId
+        const href    = el.dataset.href
+        // Mark read
+        await supabase.from('shares').update({ read_at: new Date().toISOString() })
+          .eq('id', shareId).is('read_at', null)
+        if (href) window.location.href = href
+      })
+    })
+  }
+
+  function shareItemHTML(s) {
+    const isUnread = !s.read_at
+    const podcast  = s.podcasts || s.episodes?.podcasts
+    const art      = podcast?.artwork_url
+    const title    = s.podcasts?.title || s.episodes?.title || 'Unknown'
+    const href     = s.episodes?.id
+      ? `episode.html?id=${s.episodes.id}`
+      : s.podcasts?.id ? `podcast.html?id=${s.podcasts.id}` : '#'
+    const date     = new Date(s.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+
+    return `
+      <div class="share-item ${isUnread?'unread':''}" data-share-id="${s.id}" data-href="${href}" style="cursor:pointer">
+        ${art
+          ? `<img class="share-item-art" src="${escHtml(art)}" alt="">`
+          : '<div class="share-item-art" style="display:flex;align-items:center;justify-content:center;font-size:1.4rem">🎙️</div>'
+        }
+        <div class="share-item-info">
+          <div class="share-item-title">${escHtml(title)}</div>
+          <div class="share-item-from">From ${escHtml(s.sender?.full_name || 'Someone')} · ${date}</div>
+          ${s.message ? `<div class="share-item-msg">"${escHtml(s.message)}"</div>` : ''}
+        </div>
+        ${isUnread ? '<span class="badge badge-new">New</span>' : ''}
+      </div>`
+  }
+
+  // ----- Diary -----
+  async function loadDiary() {
+    const entries = await getMyLog(60)
+    const list = document.getElementById('diary-list')
+
+    if (!entries.length) {
+      list.innerHTML = `<div class="empty-state">
+        <div class="empty-icon">📓</div>
+        <h3>Your diary is empty</h3>
+        <p>Log episodes from the episode page after you listen</p>
+      </div>`
+      return
+    }
+
+    // Group by month
+    const groups = {}
+    entries.forEach(e => {
+      const d     = new Date(e.listened_on)
+      const label = d.toLocaleString('default', { month: 'long', year: 'numeric' })
+      if (!groups[label]) groups[label] = []
+      groups[label].push(e)
+    })
+
+    list.innerHTML = Object.entries(groups).map(([month, items]) => `
+      <div class="diary-month-group">
+        <div class="diary-month-label">${month}</div>
+        ${items.map(e => {
+          const ep = e.episodes
+          const p  = ep?.podcasts
+          return `
+            <a href="episode.html?id=${ep.id}" class="diary-entry" style="text-decoration:none">
+              ${p?.artwork_url
+                ? `<img class="trending-art" src="${escHtml(p.artwork_url)}" alt="" loading="lazy">`
+                : '<div class="trending-art" style="display:flex;align-items:center;justify-content:center;font-size:1.4rem">🎙️</div>'}
+              <div class="diary-meta">
+                <div class="diary-date">${formatDate(e.listened_on)}</div>
+                <div class="trending-title">${escHtml(ep?.title || '')}</div>
+                <div class="trending-podcast">${escHtml(p?.title || '')}</div>
+                ${e.rating ? `<div class="diary-rating">${renderStars(e.rating, '.85rem')}</div>` : ''}
+                ${e.review ? `<div class="diary-review">"${escHtml(e.review)}"</div>` : ''}
+              </div>
+            </a>`
+        }).join('')}
+      </div>`
+    ).join('')
+  }
+
+  // ----- Queue -----
+  async function loadQueue() {
+    const items = await getMyQueue()
+    const list  = document.getElementById('queue-list')
+
+    if (!items.length) {
+      list.innerHTML = `<div class="empty-state">
+        <div class="empty-icon">🎯</div>
+        <h3>Queue is empty</h3>
+        <p>Add episodes or podcasts to your queue from their pages</p>
+      </div>`
+      return
+    }
+
+    list.innerHTML = `<div class="card" style="padding:0">` +
+      items.map(item => {
+        const ep  = item.episodes
+        const pod = item.podcasts || ep?.podcasts
+        const title = ep?.title || pod?.title || 'Unknown'
+        const href  = ep?.id ? `episode.html?id=${ep.id}` : pod?.id ? `podcast.html?id=${pod.id}` : '#'
+        const type  = ep?.id ? 'Episode' : 'Podcast'
+        return `
+          <div class="episode-row" style="cursor:pointer" onclick="location.href='${href}'">
+            ${pod?.artwork_url
+              ? `<img src="${escHtml(pod.artwork_url)}" alt="" style="width:44px;height:44px;border-radius:6px;object-fit:cover;flex-shrink:0">`
+              : '<div style="width:44px;height:44px;border-radius:6px;background:var(--accent-light);display:flex;align-items:center;justify-content:center;font-size:1.2rem;flex-shrink:0">🎙️</div>'
+            }
+            <div class="episode-row-main">
+              <div style="font-size:0.78rem;color:var(--gray-600);margin-bottom:0.1rem">${type}</div>
+              <div class="episode-row-title">${escHtml(title)}</div>
+            </div>
+            <div class="episode-row-actions">
+              <button class="btn-icon" title="Remove from queue" data-remove-queue="${item.id}" onclick="event.stopPropagation()">✕</button>
+            </div>
+          </div>`
+      }).join('') +
+      `</div>`
+
+    list.querySelectorAll('[data-remove-queue]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        await removeFromQueue(btn.dataset.removeQueue)
+        await loadQueue()
+      })
+    })
+  }
+
+  function escHtml(str) {
+    return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
+  }
+
+  init()
+</script>
+</body>
+</html>

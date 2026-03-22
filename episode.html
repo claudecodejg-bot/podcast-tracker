@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Episode — Pod Tracker</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<nav>
+  <a href="index.html" class="nav-brand">🎙️ <span>Pod</span>Tracker</a>
+  <ul class="nav-center">
+    <li><a href="index.html"   data-page="home">Home</a></li>
+    <li><a href="browse.html"  data-page="browse">Browse</a></li>
+    <li><a href="library.html" data-page="library">My Library</a></li>
+  </ul>
+  <div class="nav-right">
+    <div class="nav-notification">
+      <a href="library.html#shared" title="Notifications">🔔</a>
+      <span id="nav-notification-badge" class="hidden"></span>
+    </div>
+    <button id="nav-hamburger" aria-label="Menu">
+      <span></span><span></span><span></span>
+    </button>
+    <button id="nav-auth-btn"></button>
+  </div>
+</nav>
+
+<main>
+  <div class="container" style="max-width:760px">
+    <div id="episode-container">
+      <div class="loading-state"><div class="spinner"></div> Loading episode…</div>
+    </div>
+  </div>
+</main>
+
+<footer>Pod Tracker &copy; <span id="footer-year"></span></footer>
+<div id="share-modal-container"></div>
+
+<!-- Log Episode Modal -->
+<div id="log-modal" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>📓 Log Episode</h3>
+      <button class="modal-close" id="log-modal-close">✕</button>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:.85rem;margin-top:.75rem">
+      <div>
+        <label style="display:block;font-size:.82rem;color:var(--text-muted);margin-bottom:.3rem">Date Listened</label>
+        <input type="date" id="log-date-input" class="log-modal-date">
+      </div>
+      <div>
+        <label style="display:block;font-size:.82rem;color:var(--text-muted);margin-bottom:.3rem">Rating (optional)</label>
+        <div id="log-star-mount" style="display:flex;align-items:center;gap:.25rem"></div>
+      </div>
+      <div>
+        <label style="display:block;font-size:.82rem;color:var(--text-muted);margin-bottom:.3rem">Quick review (optional)</label>
+        <textarea id="log-review-input" class="search-input" placeholder="What did you think?" style="width:100%;box-sizing:border-box;min-height:80px;resize:vertical"></textarea>
+      </div>
+    </div>
+    <div style="margin-top:1.25rem;display:flex;gap:.75rem;justify-content:flex-end">
+      <button class="btn btn-outline" id="log-cancel-btn">Cancel</button>
+      <button class="btn btn-primary" id="log-save-btn">Save to Diary</button>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+  import { supabase, FUNCTIONS_URL } from './js/supabase-client.js'
+  import { initNav, getCurrentUser } from './js/auth.js'
+  import { platformBadge, rankBadge, formatDate, formatDuration, formatCount } from './js/search.js'
+  import { initShareModal, openShareModal } from './js/share.js'
+  import {
+    mountStarWidget, getUserRating, saveRating,
+    getEpisodeRatingStats, renderHistogram, renderStars, formatRating,
+    logEpisode, addToQueue, isInQueue
+  } from './js/ratings.js'
+
+  document.getElementById('footer-year').textContent = new Date().getFullYear()
+  document.getElementById('nav-hamburger').addEventListener('click', () => {
+    document.querySelector('.nav-center').classList.toggle('open')
+  })
+
+  const params    = new URLSearchParams(location.search)
+  const episodeId = params.get('id')
+  if (!episodeId) { window.location.href = 'browse.html'; }
+
+  let currentUser  = null
+  let episode      = null
+  let podcast      = null
+  let isEpLiked    = false
+  let epLikeCount  = 0
+  let isAdmin      = false
+  let myRating     = null
+  let ratingStats  = null
+  let inQueue      = false
+  let starWidget   = null
+
+  async function init() {
+    await initNav()
+    currentUser = await getCurrentUser()
+    isAdmin = currentUser?.is_admin || false
+    if (currentUser) await initShareModal()
+
+    const { data: ep, error } = await supabase
+      .from('episodes')
+      .select(`
+        *,
+        podcasts(id, title, artwork_url, platform, author)
+      `)
+      .eq('id', episodeId)
+      .single()
+
+    if (error || !ep) {
+      document.getElementById('episode-container').innerHTML =
+        '<div class="empty-state"><div class="empty-icon">😕</div><h3>Episode not found</h3></div>'
+      return
+    }
+
+    episode = ep
+    podcast = ep.podcasts
+
+    // Get episode like count + whether current user liked it
+    const { count: likeCnt } = await supabase
+      .from('episode_likes')
+      .select('id', { count: 'exact', head: true })
+      .eq('episode_id', episodeId)
+
+    epLikeCount = likeCnt || 0
+
+    if (currentUser) {
+      const { data: myLike } = await supabase
+        .from('episode_likes')
+        .select('id')
+        .eq('user_id', currentUser.id)
+        .eq('episode_id', episodeId)
+        .maybeSingle()
+      isEpLiked = !!myLike
+    }
+
+    // Fetch rating data
+    ratingStats = await getEpisodeRatingStats(episodeId)
+    if (currentUser) {
+      ;[myRating, inQueue] = await Promise.all([
+        getUserRating(episodeId),
+        isInQueue({ episodeId })
+      ])
+    }
+
+    document.title = `${ep.title} — Pod Tracker`
+    render()
+  }
+
+  function render() {
+    const container = document.getElementById('episode-container')
+
+    // Performance bar width (cap at 100% display, but show actual value)
+    const avg     = episode.likes_vs_avg || 0
+    const barPct  = Math.min(avg * 50, 100)  // 2× avg = full bar
+    const barCls  = avg >= 2 ? 'standout' : avg >= 1 ? 'above-avg' : ''
+
+    container.innerHTML = `
+      <div style="margin-top:1.5rem;display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap">
+        <a href="${podcast ? `podcast.html?id=${podcast.id}` : 'browse.html'}" class="text-muted text-sm">
+          ← ${escHtml(podcast?.title || 'Back')}
+        </a>
+      </div>
+
+      <div class="card mt-2">
+        <!-- Episode header -->
+        <div style="display:flex;gap:1rem;align-items:flex-start">
+          ${podcast?.artwork_url
+            ? `<img src="${escHtml(podcast.artwork_url)}" alt="" style="width:64px;height:64px;border-radius:8px;object-fit:cover;flex-shrink:0">`
+            : '<div style="width:64px;height:64px;border-radius:8px;background:var(--accent-light);display:flex;align-items:center;justify-content:center;font-size:1.8rem;flex-shrink:0">🎙️</div>'
+          }
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap;margin-bottom:0.25rem">
+              ${podcast ? platformBadge(podcast.platform) : ''}
+              ${rankBadge(episode.likes_vs_avg)}
+            </div>
+            <h1 style="font-size:1.25rem;font-weight:800;line-height:1.3">${escHtml(episode.title)}</h1>
+            <p class="text-muted text-sm" style="margin-top:0.2rem">
+              ${escHtml(podcast?.author || '')}
+              ${episode.published_at ? ' · ' + formatDate(episode.published_at) : ''}
+              ${episode.duration_seconds ? ' · ' + formatDuration(episode.duration_seconds) : ''}
+            </p>
+          </div>
+        </div>
+
+        <!-- Action bar -->
+        <div style="display:flex;gap:0.6rem;flex-wrap:wrap;align-items:center;margin-top:1rem;padding-top:0.75rem;border-top:1px solid var(--bg-elevated)">
+          ${episode.episode_url
+            ? `<a href="${escHtml(episode.episode_url)}" target="_blank" class="btn btn-primary btn-sm">▶ Listen</a>`
+            : ''
+          }
+          <button class="like-btn ${isEpLiked?'liked':''}" id="ep-like-btn">
+            <span class="heart">${isEpLiked?'❤️':'🤍'}</span>
+            <span id="ep-like-count">${epLikeCount}</span>
+          </button>
+          <button class="log-btn ${false?'logged':''}" id="log-ep-btn">📓 Log</button>
+          <button class="log-btn ${inQueue?'logged':''}" id="queue-ep-btn">${inQueue?'✅ Queued':'🎯 Queue'}</button>
+          <button class="btn btn-secondary btn-sm" id="share-ep-btn">📤 Share</button>
+          ${isAdmin && !episode.summary
+            ? `<button class="btn btn-outline btn-sm" id="summarize-btn">✨ Generate Summary</button>`
+            : ''
+          }
+        </div>
+      </div>
+
+      <!-- Your Rating -->
+      ${currentUser ? `
+      <div class="card mt-2">
+        <div style="font-weight:700;font-size:.9rem;margin-bottom:.75rem">⭐ Your Rating</div>
+        <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap">
+          <div id="star-widget-mount" style="display:flex;align-items:center;gap:.25rem"></div>
+          <span class="text-muted text-sm" id="my-rating-label">${myRating ? `You rated: ${formatRating(myRating)}` : 'Click to rate'}</span>
+        </div>
+      </div>` : ''}
+
+      <!-- Community Ratings -->
+      ${ratingStats.count > 0 ? `
+      <div class="card mt-2">
+        <div style="font-weight:700;font-size:.9rem;margin-bottom:.75rem">👥 Community Ratings <span class="text-muted text-sm">(${ratingStats.count} rating${ratingStats.count !== 1 ? 's' : ''})</span></div>
+        <div style="display:flex;gap:2rem;align-items:flex-start;flex-wrap:wrap">
+          <div class="avg-rating-block" style="padding:.75rem 1.25rem">
+            <div class="avg-num">${ratingStats.avg}</div>
+            <div>${renderStars(ratingStats.avg, '1rem')}</div>
+          </div>
+          <div id="ep-histogram" class="rating-histogram" style="flex:1;min-width:180px"></div>
+        </div>
+      </div>` : ''}
+
+      <!-- Performance card (YouTube only) -->
+      ${episode.platform_likes != null ? `
+      <div class="perf-card mt-2">
+        <div style="font-weight:700;font-size:0.88rem;margin-bottom:0.35rem">📊 Performance vs. Channel Average</div>
+        <div class="perf-bar-wrap">
+          <div class="perf-bar ${barCls}" style="width:${barPct}%"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:0.8rem;color:var(--gray-600)">
+          <span>${formatCount(episode.platform_likes)} likes · ${formatCount(episode.platform_views)} views</span>
+          <span>${avg >= 1 ? `${(avg * 100).toFixed(0)}% of average` : `${(avg * 100).toFixed(0)}% of average`}</span>
+        </div>
+      </div>` : ''}
+
+      <!-- AI Summary -->
+      ${episode.summary ? `
+      <div class="summary-section mt-2">
+        <div class="summary-label">✨ AI Summary</div>
+        <div class="summary-text">${escHtml(episode.summary)}</div>
+        ${episode.key_takeaways?.length ? `
+        <div style="margin-top:0.85rem;font-weight:700;font-size:0.85rem;color:var(--accent-dark)">Key Takeaways</div>
+        <div class="takeaways-list">
+          ${episode.key_takeaways.map(t => `<div class="takeaway-item">${escHtml(t)}</div>`).join('')}
+        </div>` : ''}
+      </div>` : (episode.description ? `
+      <div class="card mt-2">
+        <div style="font-weight:700;font-size:0.9rem;margin-bottom:0.5rem">Description</div>
+        <div style="font-size:0.9rem;line-height:1.6;color:var(--gray-800)">${escHtml(episode.description)}</div>
+      </div>` : '')}
+    `
+
+    // Wire buttons
+    document.getElementById('ep-like-btn').addEventListener('click', toggleEpLike)
+    document.getElementById('share-ep-btn').addEventListener('click', () => {
+      openShareModal({ episodeId: episode.id, title: episode.title })
+    })
+
+    const sumBtn = document.getElementById('summarize-btn')
+    if (sumBtn) sumBtn.addEventListener('click', generateSummary)
+
+    // Log button
+    const logBtn = document.getElementById('log-ep-btn')
+    if (logBtn) logBtn.addEventListener('click', () => openLogModal())
+
+    // Queue button
+    const qBtn = document.getElementById('queue-ep-btn')
+    if (qBtn) qBtn.addEventListener('click', toggleQueue)
+
+    // Star widget
+    const starMount = document.getElementById('star-widget-mount')
+    if (starMount) {
+      starWidget = mountStarWidget(starMount, {
+        initialRating: myRating,
+        episodeId,
+        readonly: !currentUser,
+        onRate: async (rating) => {
+          await saveRating(episodeId, rating)
+          myRating = rating
+          const label = document.getElementById('my-rating-label')
+          if (label) label.textContent = rating ? `You rated: ${formatRating(rating)}` : 'Click to rate'
+        }
+      })
+    }
+
+    // Histogram
+    const histEl = document.getElementById('ep-histogram')
+    if (histEl && ratingStats.count > 0) {
+      renderHistogram(histEl, ratingStats.histogram, ratingStats.count)
+    }
+  }
+
+  async function toggleEpLike() {
+    if (!currentUser) { window.location.href = 'login.html'; return }
+    const btn   = document.getElementById('ep-like-btn')
+    const heart = btn.querySelector('.heart')
+    const cnt   = document.getElementById('ep-like-count')
+    btn.disabled = true
+
+    if (isEpLiked) {
+      await supabase.from('episode_likes').delete()
+        .eq('user_id', currentUser.id).eq('episode_id', episodeId)
+      isEpLiked = false
+      epLikeCount = Math.max(0, epLikeCount - 1)
+    } else {
+      await supabase.from('episode_likes').upsert(
+        { user_id: currentUser.id, episode_id: episodeId },
+        { onConflict: 'user_id,episode_id' }
+      )
+      isEpLiked = true
+      epLikeCount++
+    }
+
+    btn.disabled = false
+    btn.classList.toggle('liked', isEpLiked)
+    heart.textContent = isEpLiked ? '❤️' : '🤍'
+    cnt.textContent = epLikeCount
+  }
+
+  async function toggleQueue() {
+    if (!currentUser) { window.location.href = 'login.html'; return }
+    const btn = document.getElementById('queue-ep-btn')
+    btn.disabled = true
+    if (inQueue) {
+      // Remove — find the queue item id
+      const { data } = await supabase
+        .from('listen_queue')
+        .select('id')
+        .eq('user_id', currentUser.id)
+        .eq('episode_id', episodeId)
+        .maybeSingle()
+      if (data) await supabase.from('listen_queue').delete().eq('id', data.id)
+      inQueue = false
+    } else {
+      await addToQueue({ episodeId })
+      inQueue = true
+    }
+    btn.disabled = false
+    btn.classList.toggle('logged', inQueue)
+    btn.textContent = inQueue ? '✅ Queued' : '🎯 Queue'
+  }
+
+  let logStarWidget = null
+
+  function openLogModal() {
+    if (!currentUser) { window.location.href = 'login.html'; return }
+    // Set today's date
+    document.getElementById('log-date-input').value = new Date().toISOString().slice(0, 10)
+    document.getElementById('log-review-input').value = ''
+    document.getElementById('log-modal').classList.remove('hidden')
+    // Mount star widget in modal
+    const mount = document.getElementById('log-star-mount')
+    logStarWidget = mountStarWidget(mount, { episodeId, readonly: false })
+  }
+
+  document.getElementById('log-modal-close').addEventListener('click', () => document.getElementById('log-modal').classList.add('hidden'))
+  document.getElementById('log-cancel-btn').addEventListener('click',   () => document.getElementById('log-modal').classList.add('hidden'))
+  document.getElementById('log-save-btn').addEventListener('click', async () => {
+    const btn    = document.getElementById('log-save-btn')
+    btn.disabled = true
+    btn.textContent = 'Saving…'
+
+    await logEpisode(episodeId, {
+      listenedOn: document.getElementById('log-date-input').value,
+      review:     document.getElementById('log-review-input').value.trim() || null,
+      rating:     logStarWidget?.getValue() || null
+    })
+
+    // Also save the star rating to the main ratings table if provided
+    const logRating = logStarWidget?.getValue()
+    if (logRating) await saveRating(episodeId, logRating)
+
+    btn.disabled = false
+    btn.textContent = 'Save to Diary'
+    document.getElementById('log-modal').classList.add('hidden')
+    document.getElementById('log-ep-btn').classList.add('logged')
+    document.getElementById('log-ep-btn').textContent = '📓 Logged!'
+  })
+
+  async function generateSummary() {
+    const btn = document.getElementById('summarize-btn')
+    btn.disabled = true
+    btn.textContent = '✨ Generating…'
+
+    const session = (await supabase.auth.getSession()).data.session
+    if (!session) {
+      btn.disabled = false
+      btn.textContent = '✨ Generate Summary'
+      alert('You must be signed in to generate summaries.')
+      return
+    }
+
+    let resp, result
+    try {
+      resp = await fetch(`${FUNCTIONS_URL}/generate-summary`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`
+        },
+        body: JSON.stringify({ episode_id: episodeId })
+      })
+      result = await resp.json()
+    } catch (err) {
+      btn.disabled = false
+      btn.textContent = '✨ Generate Summary'
+      alert(`Request failed: ${err.message}`)
+      return
+    }
+
+    if (!resp.ok) {
+      btn.disabled = false
+      btn.textContent = '✨ Generate Summary'
+      alert(`Could not generate summary: ${result?.error || resp.statusText}`)
+      return
+    }
+
+    // Reload the page to show the new summary
+    window.location.reload()
+  }
+
+  function escHtml(str) {
+    return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
+  }
+
+  init()
+</script>
+</body>
+</html>

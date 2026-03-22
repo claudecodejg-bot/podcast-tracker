@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Browse — Pod Tracker</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<nav>
+  <a href="index.html" class="nav-brand">🎙️ <span>Pod</span>Tracker</a>
+  <ul class="nav-center">
+    <li><a href="index.html"   data-page="home">Home</a></li>
+    <li><a href="browse.html"  data-page="browse">Browse</a></li>
+    <li><a href="library.html" data-page="library">My Library</a></li>
+  </ul>
+  <div class="nav-right">
+    <div class="nav-notification">
+      <a href="library.html#shared" title="Notifications">🔔</a>
+      <span id="nav-notification-badge" class="hidden"></span>
+    </div>
+    <button id="nav-hamburger" aria-label="Menu">
+      <span></span><span></span><span></span>
+    </button>
+    <button id="nav-auth-btn"></button>
+  </div>
+</nav>
+
+<main>
+  <div class="page-header">
+    <h1 class="page-title">Browse Podcasts</h1>
+    <p class="page-subtitle">Search across Apple Podcasts, YouTube, and more — or paste any URL</p>
+  </div>
+
+  <div class="container">
+
+    <!-- Search bar -->
+    <div class="search-bar mb-2">
+      <div class="search-input-wrap" style="flex:1">
+        <span class="search-icon">🔍</span>
+        <input type="text" id="search-input" placeholder="Search podcasts or paste a URL…" autocomplete="off">
+      </div>
+      <button class="btn btn-primary" id="search-btn">Search</button>
+    </div>
+
+    <!-- Platform filter -->
+    <div class="filter-bar" id="platform-filter">
+      <button class="filter-chip active" data-platform="">All Platforms</button>
+      <button class="filter-chip" data-platform="youtube">▶ YouTube</button>
+      <button class="filter-chip" data-platform="apple">🎵 Apple</button>
+      <button class="filter-chip" data-platform="spotify">🎧 Spotify</button>
+      <button class="filter-chip" data-platform="rss">📡 RSS</button>
+    </div>
+
+    <!-- Category filter -->
+    <div id="category-filter" class="filter-bar mb-2"></div>
+
+    <!-- Results -->
+    <div id="results-section">
+      <!-- Browsing DB podcasts by default -->
+      <div class="section-header">
+        <span class="section-title" id="results-label">All Podcasts</span>
+        <span class="text-muted text-sm" id="results-count"></span>
+      </div>
+      <div id="results-grid" class="grid-4">
+        <div class="loading-state"><div class="spinner"></div> Loading…</div>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<footer>Pod Tracker &copy; <span id="footer-year"></span></footer>
+<div id="share-modal-container"></div>
+
+<script type="module">
+  import { supabase } from './js/supabase-client.js'
+  import { initNav, getCurrentUser } from './js/auth.js'
+  import { searchPodcasts, parseUrl, addPodcast, platformBadge, looksLikeUrl } from './js/search.js'
+  import { initShareModal } from './js/share.js'
+
+  document.getElementById('footer-year').textContent = new Date().getFullYear()
+
+  // Mobile nav
+  document.getElementById('nav-hamburger').addEventListener('click', () => {
+    document.querySelector('.nav-center').classList.toggle('open')
+  })
+
+  let currentUser = null
+  let categories  = []
+  let allPodcasts = []
+  let activePlatform = ''
+  let activeCategory = ''
+  let searchResults  = null   // null = showing DB, array = showing search results
+
+  async function init() {
+    await initNav('browse')
+    currentUser = await getCurrentUser()
+    if (currentUser) initShareModal()
+
+    const [catsRes, podRes] = await Promise.all([
+      supabase.from('categories').select('*').order('sort_order'),
+      supabase.from('podcasts').select(`
+        id, title, author, artwork_url, platform, platform_id,
+        avg_platform_likes,
+        podcast_likes(count),
+        subscriptions(count)
+      `).order('created_at', { ascending: false })
+    ])
+
+    categories  = catsRes.data || []
+    allPodcasts = (podRes.data || []).map(p => ({
+      ...p,
+      like_count: p.podcast_likes?.[0]?.count || 0,
+      sub_count:  p.subscriptions?.[0]?.count  || 0
+    }))
+
+    buildCategoryFilter()
+
+    // Handle URL params: ?q=query or ?cat=categoryId
+    const params = new URLSearchParams(location.search)
+    const urlQuery = params.get('q')
+    const urlCat   = params.get('cat')
+
+    if (urlQuery) {
+      document.getElementById('search-input').value = urlQuery
+      await doSearch()
+    } else if (urlCat) {
+      activeCategory = urlCat
+      // Activate the matching chip
+      const chip = document.querySelector(`#category-filter [data-cat="${urlCat}"]`)
+      if (chip) {
+        document.querySelectorAll('#category-filter .filter-chip').forEach(b => b.classList.remove('active'))
+        chip.classList.add('active')
+      }
+      applyFilters()
+    } else {
+      renderGrid(allPodcasts)
+    }
+  }
+
+  function buildCategoryFilter() {
+    const bar = document.getElementById('category-filter')
+    bar.innerHTML = `<button class="filter-chip active" data-cat="">All Categories</button>`
+    for (const c of categories) {
+      const btn = document.createElement('button')
+      btn.className = 'filter-chip'
+      btn.dataset.cat = c.id
+      btn.textContent = `${c.icon} ${c.name}`
+      bar.appendChild(btn)
+    }
+    bar.addEventListener('click', (e) => {
+      const chip = e.target.closest('[data-cat]')
+      if (!chip) return
+      bar.querySelectorAll('.filter-chip').forEach(b => b.classList.remove('active'))
+      chip.classList.add('active')
+      activeCategory = chip.dataset.cat
+      applyFilters()
+    })
+  }
+
+  document.getElementById('platform-filter').addEventListener('click', (e) => {
+    const chip = e.target.closest('[data-platform]')
+    if (!chip) return
+    document.querySelectorAll('#platform-filter .filter-chip').forEach(b => b.classList.remove('active'))
+    chip.classList.add('active')
+    activePlatform = chip.dataset.platform
+    applyFilters()
+  })
+
+  function applyFilters() {
+    const source = searchResults || allPodcasts
+    let filtered = source
+    if (activePlatform) filtered = filtered.filter(p => p.platform === activePlatform)
+    if (activeCategory) filtered = filtered.filter(p => p.category_id === activeCategory)
+    renderGrid(filtered)
+  }
+
+  async function doSearch() {
+    const q = document.getElementById('search-input').value.trim()
+    if (!q) {
+      searchResults = null
+      document.getElementById('results-label').textContent = 'All Podcasts'
+      applyFilters()
+      return
+    }
+
+    const resultsGrid = document.getElementById('results-grid')
+    const label       = document.getElementById('results-label')
+    resultsGrid.innerHTML = '<div class="loading-state"><div class="spinner"></div> Searching…</div>'
+    label.textContent = `Results for "${q}"`
+
+    if (looksLikeUrl(q)) {
+      const parsed = await parseUrl(q)
+      searchResults = parsed ? [parsed] : []
+    } else {
+      searchResults = await searchPodcasts(q)
+    }
+
+    document.getElementById('results-count').textContent = `${searchResults.length} result${searchResults.length !== 1 ? 's' : ''}`
+    applyFilters()
+  }
+
+  document.getElementById('search-btn').addEventListener('click', doSearch)
+  document.getElementById('search-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') doSearch()
+  })
+
+  function renderGrid(podcasts) {
+    const grid = document.getElementById('results-grid')
+    document.getElementById('results-count').textContent = `${podcasts.length} podcast${podcasts.length !== 1 ? 's' : ''}`
+
+    if (!podcasts.length) {
+      grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1">
+        <div class="empty-icon">🔍</div>
+        <h3>No podcasts found</h3>
+        <p>Try a different search term or paste a URL</p>
+      </div>`
+      return
+    }
+
+    grid.innerHTML = podcasts.map(p => podcastCardHTML(p)).join('')
+
+    // Wire up subscribe buttons
+    grid.querySelectorAll('[data-subscribe]').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation()
+        if (!currentUser) { window.location.href = 'login.html'; return }
+        await handleSubscribe(btn)
+      })
+    })
+
+    // Wire up card clicks
+    grid.querySelectorAll('.podcast-card[data-podcast-id]').forEach(card => {
+      card.addEventListener('click', () => {
+        window.location.href = `podcast.html?id=${card.dataset.podcastId}`
+      })
+    })
+
+    // Wire up "Add & Subscribe" for external search results
+    grid.querySelectorAll('[data-add-podcast]').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation()
+        if (!currentUser) { window.location.href = 'login.html'; return }
+        await handleAddAndSubscribe(btn)
+      })
+    })
+  }
+
+  function podcastCardHTML(p) {
+    const isInDB    = !!p.id
+    const artSrc    = p.artwork_url
+    const artEl     = artSrc
+      ? `<img class="podcast-card-art" src="${artSrc}" alt="" loading="lazy" onerror="this.style.display='none'">`
+      : `<div class="podcast-card-art-placeholder">🎙️</div>`
+    const likes     = p.like_count ?? 0
+    const actionBtn = isInDB
+      ? `<button class="subscribe-btn btn-sm" data-subscribe="${p.id}" data-subscribed="false">+ Follow</button>`
+      : `<button class="btn btn-outline btn-sm" data-add-podcast data-podcast='${JSON.stringify(p).replace(/'/g, "&#39;")}'>+ Add</button>`
+
+    return `
+      <div class="podcast-card" data-podcast-id="${p.id || ''}">
+        ${artEl}
+        <div class="podcast-card-body">
+          <div class="podcast-card-title">${escHtml(p.title)}</div>
+          <div class="podcast-card-author text-muted">${escHtml(p.author || '')}</div>
+          <div class="podcast-card-footer">
+            ${platformBadge(p.platform)}
+            ${likes ? `<span class="text-muted text-sm">❤️ ${likes}</span>` : ''}
+          </div>
+          <div style="margin-top:0.5rem">${actionBtn}</div>
+        </div>
+      </div>`
+  }
+
+  async function handleSubscribe(btn) {
+    const podcastId = btn.dataset.subscribe
+    const subscribed = btn.dataset.subscribed === 'true'
+
+    if (subscribed) {
+      await supabase.from('subscriptions').delete()
+        .eq('user_id', currentUser.id).eq('podcast_id', podcastId)
+      btn.textContent = '+ Follow'
+      btn.dataset.subscribed = 'false'
+      btn.classList.remove('subscribed')
+    } else {
+      await supabase.from('subscriptions').upsert(
+        { user_id: currentUser.id, podcast_id: podcastId },
+        { onConflict: 'user_id,podcast_id' }
+      )
+      btn.textContent = '✓ Following'
+      btn.dataset.subscribed = 'true'
+      btn.classList.add('subscribed')
+    }
+  }
+
+  async function handleAddAndSubscribe(btn) {
+    btn.disabled = true
+    btn.textContent = 'Adding…'
+    try {
+      const podcastData = JSON.parse(btn.dataset.podcast)
+      const { podcast_id } = await addPodcast(podcastData)
+      // Subscribe
+      await supabase.from('subscriptions').upsert(
+        { user_id: currentUser.id, podcast_id },
+        { onConflict: 'user_id,podcast_id' }
+      )
+      window.location.href = `podcast.html?id=${podcast_id}`
+    } catch (err) {
+      btn.disabled = false
+      btn.textContent = '+ Add'
+      alert('Could not add podcast: ' + err.message)
+    }
+  }
+
+  function escHtml(str) {
+    return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
+  }
+
+  init()
+</script>
+</body>
+</html>

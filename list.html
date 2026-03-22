@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>List — Pod Tracker</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<nav>
+  <a href="index.html" class="nav-brand">🎙️ <span>Pod</span>Tracker</a>
+  <ul class="nav-center">
+    <li><a href="index.html"   data-page="home">Home</a></li>
+    <li><a href="browse.html"  data-page="browse">Browse</a></li>
+    <li><a href="library.html" data-page="library">My Library</a></li>
+  </ul>
+  <div class="nav-right">
+    <div class="nav-notification">
+      <a href="library.html#shared" title="Notifications">🔔</a>
+      <span id="nav-notification-badge" class="hidden"></span>
+    </div>
+    <button id="nav-hamburger" aria-label="Menu">
+      <span></span><span></span><span></span>
+    </button>
+    <button id="nav-auth-btn"></button>
+  </div>
+</nav>
+
+<main>
+  <div class="container" style="max-width:760px">
+    <div id="list-container">
+      <div class="loading-state" style="padding:4rem 0"><div class="spinner"></div> Loading list…</div>
+    </div>
+  </div>
+</main>
+
+<footer>Pod Tracker &copy; <span id="footer-year"></span></footer>
+
+<script type="module">
+  import { supabase }            from './js/supabase-client.js'
+  import { initNav, getCurrentUser } from './js/auth.js'
+  import { platformBadge, formatDate } from './js/search.js'
+  import { renderStars }         from './js/ratings.js'
+
+  document.getElementById('footer-year').textContent = new Date().getFullYear()
+  document.getElementById('nav-hamburger').addEventListener('click', () => {
+    document.querySelector('.nav-center').classList.toggle('open')
+  })
+
+  const listId = new URLSearchParams(location.search).get('id')
+  if (!listId) location.href = 'browse.html'
+
+  let me     = null
+  let isOwner = false
+
+  async function init() {
+    await initNav(null)
+    me = await getCurrentUser()
+
+    const { data: list } = await supabase
+      .from('curated_lists')
+      .select(`
+        id, title, description, is_public, user_id, created_at, updated_at,
+        users(id, full_name)
+      `)
+      .eq('id', listId)
+      .maybeSingle()
+
+    if (!list) {
+      document.getElementById('list-container').innerHTML = `
+        <div class="empty-state mt-4">
+          <div class="empty-icon">📋</div>
+          <h3>List not found</h3>
+          <p>This list may be private or doesn't exist.</p>
+        </div>`
+      return
+    }
+
+    isOwner = me?.id === list.user_id
+    document.title = `${list.title} — Pod Tracker`
+
+    // Fetch items
+    const { data: items } = await supabase
+      .from('curated_list_items')
+      .select(`
+        id, note, sort_order,
+        podcasts(id, title, artwork_url, platform, author),
+        episodes(id, title, published_at, podcasts(id, title, artwork_url, platform))
+      `)
+      .eq('list_id', listId)
+      .order('sort_order')
+
+    const container = document.getElementById('list-container')
+    container.innerHTML = `
+      <div style="margin-top:1.5rem">
+        <a href="profile.html?user=${list.user_id}" class="text-muted text-sm">← ${escHtml(list.users?.full_name || 'Back')}</a>
+      </div>
+
+      <div class="card mt-2">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:1rem">
+          <div>
+            <div style="font-size:2rem;margin-bottom:.25rem">📋</div>
+            <h1 style="font-size:1.4rem;font-weight:800;margin:0 0 .4rem">${escHtml(list.title)}</h1>
+            ${list.description ? `<p class="text-muted" style="margin:0 0 .4rem">${escHtml(list.description)}</p>` : ''}
+            <div class="text-muted text-sm">
+              By <a href="profile.html?user=${list.user_id}" style="color:var(--accent-bright)">${escHtml(list.users?.full_name || 'Unknown')}</a>
+              · ${items?.length || 0} item${items?.length !== 1 ? 's' : ''}
+              · ${list.is_public ? 'Public' : '🔒 Private'}
+            </div>
+          </div>
+          ${isOwner ? `<button class="btn btn-sm btn-outline" id="add-item-btn">+ Add</button>` : ''}
+        </div>
+      </div>
+
+      <div id="items-list" class="mt-2" style="display:flex;flex-direction:column;gap:.6rem">
+        ${!items?.length
+          ? `<div class="empty-state">
+               <div class="empty-icon">📭</div>
+               <h3>This list is empty</h3>
+               ${isOwner ? '<p>Search for podcasts or episodes and add them.</p>' : ''}
+             </div>`
+          : items.map((item, i) => renderItem(item, i)).join('')
+        }
+      </div>
+    `
+
+    if (isOwner && document.getElementById('add-item-btn')) {
+      document.getElementById('add-item-btn').addEventListener('click', () => {
+        alert('To add items: visit the podcast or episode page and use the "Add to List" option. (Coming soon: quick-add from here)')
+      })
+    }
+  }
+
+  function renderItem(item, index) {
+    const pod = item.podcasts
+    const ep  = item.episodes
+    const epPod = ep?.podcasts
+
+    if (ep) {
+      return `
+        <a href="episode.html?id=${ep.id}" class="trending-card" style="text-decoration:none">
+          <div class="trending-rank">${index + 1}</div>
+          ${epPod?.artwork_url
+            ? `<img class="trending-art" src="${escHtml(epPod.artwork_url)}" alt="" loading="lazy">`
+            : '<div class="trending-art" style="display:flex;align-items:center;justify-content:center;font-size:1.4rem">🎙️</div>'}
+          <div class="trending-info">
+            <div class="trending-title">${escHtml(ep.title)}</div>
+            <div class="trending-podcast">${escHtml(epPod?.title || '')} · ${formatDate(ep.published_at)}</div>
+            ${item.note ? `<div class="text-muted text-sm" style="margin-top:.2rem">"${escHtml(item.note)}"</div>` : ''}
+          </div>
+          <span class="badge badge-platform">Episode</span>
+        </a>`
+    }
+
+    if (pod) {
+      return `
+        <a href="podcast.html?id=${pod.id}" class="trending-card" style="text-decoration:none">
+          <div class="trending-rank">${index + 1}</div>
+          ${pod.artwork_url
+            ? `<img class="trending-art" src="${escHtml(pod.artwork_url)}" alt="" loading="lazy">`
+            : '<div class="trending-art" style="display:flex;align-items:center;justify-content:center;font-size:1.4rem">🎙️</div>'}
+          <div class="trending-info">
+            <div class="trending-title">${escHtml(pod.title)}</div>
+            <div class="trending-podcast">${escHtml(pod.author || '')} ${platformBadge(pod.platform)}</div>
+            ${item.note ? `<div class="text-muted text-sm" style="margin-top:.2rem">"${escHtml(item.note)}"</div>` : ''}
+          </div>
+          <span class="badge badge-platform">Podcast</span>
+        </a>`
+    }
+
+    return ''
+  }
+
+  function escHtml(str) {
+    return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
+  }
+
+  init()
+</script>
+</body>
+</html>

@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin — Pod Tracker</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<nav>
+  <a href="index.html" class="nav-brand">🎙️ <span>Pod</span>Tracker</a>
+  <ul class="nav-center">
+    <li><a href="index.html"   data-page="home">Home</a></li>
+    <li><a href="browse.html"  data-page="browse">Browse</a></li>
+    <li><a href="library.html" data-page="library">My Library</a></li>
+    <li><a href="admin.html"   data-page="admin">Admin</a></li>
+  </ul>
+  <div class="nav-right">
+    <button id="nav-hamburger" aria-label="Menu">
+      <span></span><span></span><span></span>
+    </button>
+    <button id="nav-auth-btn"></button>
+  </div>
+</nav>
+
+<main>
+  <div class="page-header">
+    <h1 class="page-title">Admin Panel</h1>
+    <p class="page-subtitle">Manage categories, podcasts, and episode syncing</p>
+  </div>
+
+  <div class="container">
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="podcasts">Podcasts</button>
+      <button class="tab-btn" data-tab="categories">Categories</button>
+      <button class="tab-btn" data-tab="summaries">AI Summaries</button>
+      <button class="tab-btn" data-tab="members">Members</button>
+    </div>
+
+    <!-- Podcasts tab -->
+    <div id="tab-podcasts">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;flex-wrap:wrap;gap:0.5rem">
+        <span class="section-title">All Podcasts</span>
+        <button class="btn btn-primary btn-sm" id="refresh-all-btn">🔄 Refresh All Episodes</button>
+      </div>
+      <div id="refresh-alert" class="alert hidden"></div>
+      <div class="card" style="padding:0;overflow:auto">
+        <table class="admin-table" id="podcasts-table">
+          <thead>
+            <tr>
+              <th>Podcast</th>
+              <th>Platform</th>
+              <th>Category</th>
+              <th>Episodes</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="podcasts-tbody">
+            <tr><td colspan="5"><div class="loading-state"><div class="spinner"></div> Loading…</div></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Categories tab -->
+    <div id="tab-categories" class="hidden">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+        <span class="section-title">Categories</span>
+        <button class="btn btn-primary btn-sm" id="add-cat-btn">+ Add Category</button>
+      </div>
+      <div id="cat-form" class="card hidden" style="margin-bottom:1rem">
+        <h3 style="font-size:0.95rem;margin-bottom:0.75rem" id="cat-form-title">Add Category</h3>
+        <div id="cat-alert" class="alert hidden"></div>
+        <div style="display:flex;gap:0.75rem;flex-wrap:wrap;align-items:flex-end">
+          <div class="form-group" style="flex:1;min-width:140px;margin-bottom:0">
+            <label>Name</label>
+            <input type="text" id="cat-name" placeholder="Fantasy Football">
+          </div>
+          <div class="form-group" style="width:90px;margin-bottom:0">
+            <label>Icon</label>
+            <input type="text" id="cat-icon" placeholder="🏈" maxlength="4">
+          </div>
+          <div class="form-group" style="width:90px;margin-bottom:0">
+            <label>Sort</label>
+            <input type="number" id="cat-sort" value="0" min="0">
+          </div>
+          <button class="btn btn-primary" id="cat-save-btn">Save</button>
+          <button class="btn btn-secondary" id="cat-cancel-btn">Cancel</button>
+        </div>
+      </div>
+      <div class="card" style="padding:0;overflow:auto">
+        <table class="admin-table" id="cat-table">
+          <thead>
+            <tr><th>Icon</th><th>Name</th><th>Sort</th><th>Actions</th></tr>
+          </thead>
+          <tbody id="cat-tbody">
+            <tr><td colspan="4"><div class="loading-state"><div class="spinner"></div></div></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- AI Summaries tab -->
+    <div id="tab-summaries" class="hidden">
+      <div class="section-header mb-2">
+        <span class="section-title">Episodes Without Summaries</span>
+      </div>
+      <div id="summary-alert" class="alert hidden"></div>
+      <div class="card" style="padding:0;overflow:auto">
+        <table class="admin-table">
+          <thead>
+            <tr><th>Episode</th><th>Podcast</th><th>Date</th><th>Action</th></tr>
+          </thead>
+          <tbody id="summaries-tbody">
+            <tr><td colspan="4"><div class="loading-state"><div class="spinner"></div> Loading…</div></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Members tab -->
+    <div id="tab-members" class="hidden">
+      <div class="section-header mb-2">
+        <span class="section-title">Group Members</span>
+      </div>
+      <p class="text-muted text-sm mb-2">Add new members via the Supabase dashboard → Authentication → Users. After creating an account, the user will appear here on next login.</p>
+      <div class="card" style="padding:0;overflow:auto">
+        <table class="admin-table">
+          <thead>
+            <tr><th>Name</th><th>Email</th><th>Admin</th><th>Joined</th></tr>
+          </thead>
+          <tbody id="members-tbody">
+            <tr><td colspan="4"><div class="loading-state"><div class="spinner"></div> Loading…</div></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<footer>Pod Tracker &copy; <span id="footer-year"></span></footer>
+
+<script type="module">
+  import { supabase, FUNCTIONS_URL } from './js/supabase-client.js'
+  import { requireAdmin, initNav } from './js/auth.js'
+  import { platformBadge, formatDate } from './js/search.js'
+
+  document.getElementById('footer-year').textContent = new Date().getFullYear()
+  document.getElementById('nav-hamburger').addEventListener('click', () => {
+    document.querySelector('.nav-center').classList.toggle('open')
+  })
+
+  let categories = []
+  let editingCatId = null
+
+  async function init() {
+    const adminUser = await requireAdmin()
+    if (!adminUser) return
+    await initNav('admin')
+    await loadCategories()
+    await Promise.all([loadPodcasts(), loadSummaries(), loadMembers()])
+  }
+
+  // ----- Tab switching -----
+  document.querySelectorAll('.tab-btn[data-tab]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.tab-btn[data-tab]').forEach(b => b.classList.toggle('active', b === btn))
+      document.querySelectorAll('[id^="tab-"]').forEach(el => el.classList.toggle('hidden', el.id !== `tab-${btn.dataset.tab}`))
+    })
+  })
+
+  // ----- Podcasts tab -----
+  async function loadPodcasts() {
+    const { data: podcasts } = await supabase
+      .from('podcasts')
+      .select('id, title, platform, category_id, categories(name)')
+      .order('created_at', { ascending: false })
+
+    const tbody = document.getElementById('podcasts-tbody')
+
+    if (!podcasts?.length) {
+      tbody.innerHTML = '<tr><td colspan="5"><div class="empty-state">No podcasts yet</div></td></tr>'
+      return
+    }
+
+    // Get episode counts
+    const { data: counts } = await supabase
+      .from('episodes')
+      .select('podcast_id')
+      .in('podcast_id', podcasts.map(p => p.id))
+
+    const countMap = {}
+    for (const e of counts || []) {
+      countMap[e.podcast_id] = (countMap[e.podcast_id] || 0) + 1
+    }
+
+    const catOptions = categories.map(c =>
+      `<option value="${escHtml(c.id)}">${escHtml(c.icon)} ${escHtml(c.name)}</option>`
+    ).join('')
+
+    tbody.innerHTML = podcasts.map(p => `
+      <tr>
+        <td>
+          <a href="podcast.html?id=${p.id}" style="font-weight:600">${escHtml(p.title)}</a>
+        </td>
+        <td>${platformBadge(p.platform)}</td>
+        <td>
+          <select class="cat-select" data-podcast-id="${p.id}" style="font-size:0.82rem;padding:0.25rem 0.4rem;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);max-width:160px">
+            <option value="">— None —</option>
+            ${catOptions}
+          </select>
+        </td>
+        <td>${countMap[p.id] || 0}</td>
+        <td>
+          <button class="btn btn-secondary btn-sm" data-refresh="${p.id}">🔄 Sync</button>
+          <button class="btn btn-danger btn-sm" data-delete-podcast="${p.id}">✕</button>
+        </td>
+      </tr>`).join('')
+
+    // Set current category selections
+    tbody.querySelectorAll('.cat-select').forEach(sel => {
+      const pod = podcasts.find(p => p.id === sel.dataset.podcastId)
+      if (pod?.category_id) sel.value = pod.category_id
+      sel.addEventListener('change', () => assignCategory(sel.dataset.podcastId, sel.value || null, sel))
+    })
+
+    tbody.querySelectorAll('[data-refresh]').forEach(btn => {
+      btn.addEventListener('click', () => refreshPodcast(btn.dataset.refresh, btn))
+    })
+    tbody.querySelectorAll('[data-delete-podcast]').forEach(btn => {
+      btn.addEventListener('click', () => deletePodcast(btn.dataset.deletePodcast))
+    })
+  }
+
+  document.getElementById('refresh-all-btn').addEventListener('click', async () => {
+    const btn = document.getElementById('refresh-all-btn')
+    const alert = document.getElementById('refresh-alert')
+    btn.disabled = true
+    btn.textContent = '🔄 Refreshing…'
+    alert.className = 'alert hidden'
+
+    const session = (await supabase.auth.getSession()).data.session
+    const resp = await fetch(`${FUNCTIONS_URL}/refresh-episodes`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    })
+    const result = await resp.json()
+
+    btn.disabled = false
+    btn.textContent = '🔄 Refresh All Episodes'
+    alert.textContent = resp.ok
+      ? `Refreshed ${result.refreshed} podcast(s)`
+      : `Error: ${result.error}`
+    alert.className = `alert ${resp.ok ? 'alert-success' : 'alert-error'}`
+    if (resp.ok) await loadPodcasts()
+  })
+
+  async function refreshPodcast(podcastId, btn) {
+    btn.disabled = true
+    btn.textContent = '🔄 Syncing…'
+    const session = (await supabase.auth.getSession()).data.session
+    const resp = await fetch(`${FUNCTIONS_URL}/refresh-episodes`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ podcast_id: podcastId })
+    })
+    btn.disabled = false
+    btn.textContent = '🔄 Sync'
+    if (resp.ok) {
+      await loadPodcasts()
+      await loadSummaries()
+    }
+  }
+
+  async function deletePodcast(podcastId) {
+    if (!confirm('Delete this podcast and all its episodes? This cannot be undone.')) return
+    await supabase.from('podcasts').delete().eq('id', podcastId)
+    await loadPodcasts()
+  }
+
+  async function assignCategory(podcastId, categoryId, sel) {
+    sel.disabled = true
+    const { error } = await supabase
+      .from('podcasts')
+      .update({ category_id: categoryId })
+      .eq('id', podcastId)
+    sel.disabled = false
+    if (error) {
+      alert(`Failed to update category: ${error.message}`)
+      await loadPodcasts()
+    }
+  }
+
+  // ----- Categories tab -----
+  async function loadCategories() {
+    const { data: cats } = await supabase.from('categories').select('*').order('sort_order')
+    categories = cats || []
+
+    const tbody = document.getElementById('cat-tbody')
+    if (!cats?.length) {
+      tbody.innerHTML = '<tr><td colspan="4">No categories</td></tr>'
+      return
+    }
+    tbody.innerHTML = cats.map(c => `
+      <tr>
+        <td style="font-size:1.25rem">${escHtml(c.icon)}</td>
+        <td style="font-weight:600">${escHtml(c.name)}</td>
+        <td>${c.sort_order}</td>
+        <td>
+          <button class="btn btn-secondary btn-sm" data-edit-cat="${c.id}">Edit</button>
+          <button class="btn btn-danger btn-sm" data-delete-cat="${c.id}">✕</button>
+        </td>
+      </tr>`).join('')
+
+    tbody.querySelectorAll('[data-edit-cat]').forEach(btn => {
+      btn.addEventListener('click', () => openEditCat(btn.dataset.editCat))
+    })
+    tbody.querySelectorAll('[data-delete-cat]').forEach(btn => {
+      btn.addEventListener('click', () => deleteCat(btn.dataset.deleteCat))
+    })
+  }
+
+  document.getElementById('add-cat-btn').addEventListener('click', () => {
+    editingCatId = null
+    document.getElementById('cat-form-title').textContent = 'Add Category'
+    document.getElementById('cat-name').value = ''
+    document.getElementById('cat-icon').value = ''
+    document.getElementById('cat-sort').value = '0'
+    document.getElementById('cat-form').classList.remove('hidden')
+  })
+
+  document.getElementById('cat-cancel-btn').addEventListener('click', () => {
+    document.getElementById('cat-form').classList.add('hidden')
+  })
+
+  function openEditCat(id) {
+    const cat = categories.find(c => c.id === id)
+    if (!cat) return
+    editingCatId = id
+    document.getElementById('cat-form-title').textContent = 'Edit Category'
+    document.getElementById('cat-name').value = cat.name
+    document.getElementById('cat-icon').value = cat.icon
+    document.getElementById('cat-sort').value = cat.sort_order
+    document.getElementById('cat-form').classList.remove('hidden')
+  }
+
+  document.getElementById('cat-save-btn').addEventListener('click', async () => {
+    const name = document.getElementById('cat-name').value.trim()
+    const icon = document.getElementById('cat-icon').value.trim()
+    const sort = parseInt(document.getElementById('cat-sort').value) || 0
+    const alert = document.getElementById('cat-alert')
+
+    if (!name) { alert.textContent = 'Name required'; alert.className = 'alert alert-error'; return }
+    alert.className = 'alert hidden'
+
+    if (editingCatId) {
+      await supabase.from('categories').update({ name, icon, sort_order: sort }).eq('id', editingCatId)
+    } else {
+      await supabase.from('categories').insert({ name, icon, sort_order: sort })
+    }
+    document.getElementById('cat-form').classList.add('hidden')
+    await loadCategories()
+  })
+
+  async function deleteCat(id) {
+    if (!confirm('Delete this category? Podcasts in it will become uncategorized.')) return
+    await supabase.from('categories').delete().eq('id', id)
+    await loadCategories()
+  }
+
+  // ----- AI Summaries tab -----
+  async function loadSummaries() {
+    const { data: eps } = await supabase
+      .from('episodes')
+      .select('id, title, published_at, podcasts(title)')
+      .is('summary', null)
+      .order('published_at', { ascending: false })
+      .limit(50)
+
+    const tbody = document.getElementById('summaries-tbody')
+    if (!eps?.length) {
+      tbody.innerHTML = '<tr><td colspan="4"><div class="empty-state" style="padding:1rem">All episodes have summaries! ✅</div></td></tr>'
+      return
+    }
+    tbody.innerHTML = eps.map(ep => `
+      <tr>
+        <td><a href="episode.html?id=${ep.id}">${escHtml(ep.title)}</a></td>
+        <td>${escHtml(ep.podcasts?.title || '—')}</td>
+        <td>${formatDate(ep.published_at)}</td>
+        <td>
+          <button class="btn btn-outline btn-sm" data-gen-summary="${ep.id}">✨ Generate</button>
+        </td>
+      </tr>`).join('')
+
+    tbody.querySelectorAll('[data-gen-summary]').forEach(btn => {
+      btn.addEventListener('click', () => generateSummary(btn.dataset.genSummary, btn))
+    })
+  }
+
+  async function generateSummary(episodeId, btn) {
+    const alertEl = document.getElementById('summary-alert')
+    btn.disabled = true
+    btn.textContent = '✨ Generating…'
+    alertEl.className = 'alert hidden'
+
+    const session = (await supabase.auth.getSession()).data.session
+    const resp = await fetch(`${FUNCTIONS_URL}/generate-summary`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ episode_id: episodeId })
+    })
+    const result = await resp.json()
+
+    if (!resp.ok) {
+      alertEl.textContent = result.error || 'Generation failed'
+      alertEl.className = 'alert alert-error'
+      btn.disabled = false
+      btn.textContent = '✨ Generate'
+      return
+    }
+
+    alertEl.textContent = 'Summary generated!'
+    alertEl.className = 'alert alert-success'
+    btn.closest('tr').remove()
+    setTimeout(() => { alertEl.className = 'alert hidden' }, 3000)
+  }
+
+  // ----- Members tab -----
+  async function loadMembers() {
+    const { data: members } = await supabase
+      .from('users')
+      .select('id, full_name, email, is_admin, created_at')
+      .order('full_name')
+
+    const tbody = document.getElementById('members-tbody')
+    if (!members?.length) {
+      tbody.innerHTML = '<tr><td colspan="4">No members yet</td></tr>'
+      return
+    }
+    tbody.innerHTML = members.map(m => `
+      <tr>
+        <td style="font-weight:600">${escHtml(m.full_name)}</td>
+        <td>${escHtml(m.email || '—')}</td>
+        <td>${m.is_admin ? '✅ Admin' : '—'}</td>
+        <td>${formatDate(m.created_at)}</td>
+      </tr>`).join('')
+  }
+
+  function escHtml(str) {
+    return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
+  }
+
+  init()
+</script>
+</body>
+</html>

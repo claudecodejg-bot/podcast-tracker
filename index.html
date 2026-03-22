@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pod Tracker — Your Group Podcast Hub</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<nav>
+  <a href="index.html" class="nav-brand">🎙️ <span>Pod</span>Tracker</a>
+  <ul class="nav-center">
+    <li><a href="index.html"   data-page="home">Home</a></li>
+    <li><a href="browse.html"  data-page="browse">Browse</a></li>
+    <li><a href="library.html" data-page="library">My Library</a></li>
+  </ul>
+  <div class="nav-right">
+    <div class="nav-notification">
+      <a href="library.html#shared" title="Notifications">🔔</a>
+      <span id="nav-notification-badge" class="hidden"></span>
+    </div>
+    <button id="nav-hamburger" aria-label="Menu">
+      <span></span><span></span><span></span>
+    </button>
+    <button id="nav-auth-btn"></button>
+  </div>
+</nav>
+
+<main>
+
+  <!-- Hero -->
+  <div class="hero">
+    <h1>Your Group Podcast Hub</h1>
+    <p>Discover, track, and share the podcasts your group loves</p>
+    <div class="hero-search">
+      <input type="text" id="hero-search" placeholder="Search podcasts or paste a URL…" autocomplete="off">
+      <button class="btn btn-primary" id="hero-search-btn">Search</button>
+    </div>
+  </div>
+
+  <div class="container">
+
+    <!-- Trending section -->
+    <div class="mt-3 mb-2">
+      <div class="section-header">
+        <span class="section-title">🔥 Trending This Week</span>
+        <a href="browse.html" class="text-sm text-muted">Browse all →</a>
+      </div>
+      <div id="trending-list" style="display:flex;flex-direction:column;gap:0.6rem">
+        <div class="loading-state"><div class="spinner"></div> Loading…</div>
+      </div>
+    </div>
+
+    <!-- Most Loved Podcasts -->
+    <div class="mt-3 mb-2">
+      <div class="section-header">
+        <span class="section-title">❤️ Most Loved by the Group</span>
+        <a href="browse.html" class="text-sm text-muted">Browse all →</a>
+      </div>
+      <div id="loved-grid" class="grid-4">
+        <div class="loading-state"><div class="spinner"></div></div>
+      </div>
+    </div>
+
+    <!-- Recent with AI summaries -->
+    <div class="mt-3 mb-2">
+      <div class="section-header">
+        <span class="section-title">✨ Recently Summarized</span>
+      </div>
+      <div id="summarized-list" style="display:flex;flex-direction:column;gap:0.6rem">
+        <div class="loading-state"><div class="spinner"></div></div>
+      </div>
+    </div>
+
+    <!-- Browse by category -->
+    <div class="mt-3">
+      <div class="section-header">
+        <span class="section-title">Browse by Category</span>
+      </div>
+      <div id="category-grid" class="grid-4">
+        <div class="loading-state"><div class="spinner"></div></div>
+      </div>
+    </div>
+
+    <!-- Group Activity Feed -->
+    <div class="mt-3 mb-2">
+      <div class="section-header">
+        <span class="section-title">🎧 Group Activity</span>
+        <a href="library.html" class="text-sm text-muted">My Library →</a>
+      </div>
+      <div id="activity-feed" style="display:flex;flex-direction:column;gap:.6rem">
+        <div class="loading-state"><div class="spinner"></div></div>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<footer>Pod Tracker &copy; <span id="footer-year"></span></footer>
+
+<script type="module">
+  import { supabase } from './js/supabase-client.js'
+  import { initNav } from './js/auth.js'
+  import { platformBadge, rankBadge, formatDate } from './js/search.js'
+  import { renderStars } from './js/ratings.js'
+
+  document.getElementById('footer-year').textContent = new Date().getFullYear()
+  document.getElementById('nav-hamburger').addEventListener('click', () => {
+    document.querySelector('.nav-center').classList.toggle('open')
+  })
+
+  // Hero search → go to browse.html with query
+  function doHeroSearch() {
+    const q = document.getElementById('hero-search').value.trim()
+    if (q) window.location.href = `browse.html?q=${encodeURIComponent(q)}`
+    else window.location.href = 'browse.html'
+  }
+  document.getElementById('hero-search-btn').addEventListener('click', doHeroSearch)
+  document.getElementById('hero-search').addEventListener('keydown', e => { if (e.key === 'Enter') doHeroSearch() })
+
+  async function init() {
+    await initNav('home')
+    await Promise.all([loadTrending(), loadMostLoved(), loadSummarized(), loadCategories(), loadActivity()])
+  }
+
+  async function loadTrending() {
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+
+    const { data: eps } = await supabase
+      .from('episodes')
+      .select('id, title, published_at, likes_vs_avg, podcasts(id, title, artwork_url, platform)')
+      .gte('published_at', thirtyDaysAgo)
+      .not('likes_vs_avg', 'is', null)
+      .order('likes_vs_avg', { ascending: false })
+      .limit(8)
+
+    const list = document.getElementById('trending-list')
+
+    if (!eps?.length) {
+      list.innerHTML = `<div class="empty-state">
+        <div class="empty-icon">🎙️</div>
+        <h3>No trending data yet</h3>
+        <p>Add some podcasts and sync episodes to see trending content</p>
+      </div>`
+      return
+    }
+
+    list.innerHTML = eps.map((ep, i) => {
+      const p = ep.podcasts
+      return `
+        <a href="episode.html?id=${ep.id}" class="trending-card" style="text-decoration:none">
+          <div class="trending-rank">${i + 1}</div>
+          ${p?.artwork_url
+            ? `<img class="trending-art" src="${escHtml(p.artwork_url)}" alt="" loading="lazy">`
+            : '<div class="trending-art" style="display:flex;align-items:center;justify-content:center;font-size:1.4rem">🎙️</div>'
+          }
+          <div class="trending-info">
+            <div class="trending-title">${escHtml(ep.title)}</div>
+            <div class="trending-podcast">${escHtml(p?.title || '')} · ${formatDate(ep.published_at)}</div>
+          </div>
+          <div class="trending-badge">${rankBadge(ep.likes_vs_avg)}</div>
+        </a>`
+    }).join('')
+  }
+
+  async function loadMostLoved() {
+    const { data: podcasts } = await supabase
+      .from('podcasts')
+      .select('id, title, author, artwork_url, platform, podcast_likes(count)')
+      .order('created_at', { ascending: false })
+      .limit(50)
+
+    const grid = document.getElementById('loved-grid')
+
+    if (!podcasts?.length) {
+      grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1">
+        <div class="empty-icon">❤️</div>
+        <h3>No podcasts yet</h3>
+        <p><a href="browse.html">Browse</a> to add your first podcast</p>
+      </div>`
+      return
+    }
+
+    // Sort by likes
+    const sorted = podcasts
+      .map(p => ({ ...p, like_count: p.podcast_likes?.[0]?.count || 0 }))
+      .sort((a, b) => b.like_count - a.like_count)
+      .slice(0, 8)
+
+    grid.innerHTML = sorted.map(p => `
+      <a href="podcast.html?id=${p.id}" class="podcast-card" style="text-decoration:none">
+        ${p.artwork_url
+          ? `<img class="podcast-card-art" src="${escHtml(p.artwork_url)}" alt="" loading="lazy">`
+          : '<div class="podcast-card-art-placeholder">🎙️</div>'
+        }
+        <div class="podcast-card-body">
+          <div class="podcast-card-title">${escHtml(p.title)}</div>
+          <div class="podcast-card-author text-muted">${escHtml(p.author || '')}</div>
+          <div class="podcast-card-footer">
+            ${platformBadge(p.platform)}
+            ${p.like_count ? `<span class="text-muted text-sm">❤️ ${p.like_count}</span>` : ''}
+          </div>
+        </div>
+      </a>`).join('')
+  }
+
+  async function loadSummarized() {
+    const { data: eps } = await supabase
+      .from('episodes')
+      .select('id, title, published_at, ai_generated_at, podcasts(id, title, artwork_url, platform)')
+      .not('summary', 'is', null)
+      .order('ai_generated_at', { ascending: false })
+      .limit(5)
+
+    const list = document.getElementById('summarized-list')
+
+    if (!eps?.length) {
+      list.innerHTML = `<div class="empty-state">
+        <div class="empty-icon">✨</div>
+        <h3>No AI summaries yet</h3>
+        <p>Admins can generate summaries from the episode page or admin panel</p>
+      </div>`
+      return
+    }
+
+    list.innerHTML = eps.map(ep => {
+      const p = ep.podcasts
+      return `
+        <a href="episode.html?id=${ep.id}" class="trending-card" style="text-decoration:none">
+          ${p?.artwork_url
+            ? `<img class="trending-art" src="${escHtml(p.artwork_url)}" alt="" loading="lazy">`
+            : '<div class="trending-art" style="display:flex;align-items:center;justify-content:center;font-size:1.4rem">🎙️</div>'
+          }
+          <div class="trending-info">
+            <div class="trending-title">${escHtml(ep.title)}</div>
+            <div class="trending-podcast">${escHtml(p?.title || '')} · ${formatDate(ep.published_at)}</div>
+          </div>
+          <span class="badge badge-new">✨ Summary</span>
+        </a>`
+    }).join('')
+  }
+
+  async function loadCategories() {
+    const { data: cats } = await supabase.from('categories').select('id, name, icon').order('sort_order').limit(12)
+
+    const grid = document.getElementById('category-grid')
+    if (!cats?.length) { grid.innerHTML = ''; return }
+
+    grid.innerHTML = cats.map(c => `
+      <a href="browse.html?cat=${c.id}" class="category-card">
+        <div class="cat-icon">${escHtml(c.icon)}</div>
+        <div class="cat-name">${escHtml(c.name)}</div>
+      </a>`).join('')
+  }
+
+  async function loadActivity() {
+    const { data: entries } = await supabase
+      .from('listening_log')
+      .select(`
+        id, listened_on, review, rating, created_at,
+        users(id, full_name),
+        episodes(id, title, podcasts(id, title, artwork_url, platform))
+      `)
+      .order('created_at', { ascending: false })
+      .limit(12)
+
+    const feed = document.getElementById('activity-feed')
+
+    if (!entries?.length) {
+      feed.innerHTML = `<div class="empty-state">
+        <div class="empty-icon">🎧</div>
+        <h3>No activity yet</h3>
+        <p>Group members' listening activity will appear here</p>
+      </div>`
+      return
+    }
+
+    feed.innerHTML = entries.map(e => {
+      const ep   = e.episodes
+      const pod  = ep?.podcasts
+      const user = e.users
+      return `
+        <a href="episode.html?id=${ep?.id || ''}" class="activity-item" style="text-decoration:none">
+          <div class="activity-avatar">${(user?.full_name || '?').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase()}</div>
+          <div class="activity-body">
+            <span class="activity-user">${escHtml(user?.full_name || 'Someone')}</span>
+            listened to
+            <span class="activity-ep">${escHtml(ep?.title || 'an episode')}</span>
+            ${pod ? `<span class="activity-pod"> · ${escHtml(pod.title)}</span>` : ''}
+            ${e.rating ? `<span class="activity-rating">${renderStars(e.rating, '.85rem')}</span>` : ''}
+            ${e.review ? `<div class="activity-review">"${escHtml(e.review)}"</div>` : ''}
+            <div class="activity-time">${formatDate(e.listened_on)}</div>
+          </div>
+          ${pod?.artwork_url
+            ? `<img class="activity-art" src="${escHtml(pod.artwork_url)}" alt="" loading="lazy">`
+            : ''}
+        </a>`
+    }).join('')
+  }
+
+  function escHtml(str) {
+    return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
+  }
+
+  init()
+</script>
+</body>
+</html>
