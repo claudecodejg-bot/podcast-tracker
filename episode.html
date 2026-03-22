@@ -254,11 +254,14 @@
         <div class="takeaways-list">
           ${episode.key_takeaways.map(t => `<div class="takeaway-item">${escHtml(t)}</div>`).join('')}
         </div>` : ''}
-      </div>` : (episode.description ? `
+      </div>` : ''}
+
+      <!-- Description -->
+      ${episode.description ? `
       <div class="card mt-2">
-        <div style="font-weight:700;font-size:0.9rem;margin-bottom:0.5rem">Description</div>
+        <div style="font-weight:700;font-size:0.9rem;margin-bottom:0.5rem">📄 Description</div>
         <div style="font-size:0.9rem;line-height:1.6;color:var(--gray-800)">${escHtml(episode.description)}</div>
-      </div>` : '')}
+      </div>` : ''}
     `
 
     // Wire buttons
