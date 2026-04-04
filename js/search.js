@@ -39,11 +39,18 @@ export async function searchPodcasts(query, opts = {}) {
  * @param {string} url
  */
 export async function parseUrl(url) {
-  const { data, error } = await supabase.functions.invoke('parse-url', {
-    body: { url }
+  const session = (await supabase.auth.getSession()).data.session
+  const headers = { 'Content-Type': 'application/json' }
+  if (session) headers['Authorization'] = `Bearer ${session.access_token}`
+
+  const resp = await fetch(`${FUNCTIONS_URL}/parse-url`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ url })
   })
-  if (error) { console.error('Parse URL failed:', error.message); return null }
-  return data
+
+  if (!resp.ok) { console.error('Parse URL failed:', await resp.text()); return null }
+  return resp.json()
 }
 
 /**
@@ -56,12 +63,20 @@ export async function addPodcast(podcastData, categoryId = null) {
   const session = (await supabase.auth.getSession()).data.session
   if (!session) throw new Error('Must be logged in to add podcasts')
 
-  const { data, error } = await supabase.functions.invoke('add-podcast', {
-    body: { ...podcastData, category_id: categoryId }
+  const resp = await fetch(`${FUNCTIONS_URL}/add-podcast`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${session.access_token}`
+    },
+    body: JSON.stringify({ ...podcastData, category_id: categoryId })
   })
 
-  if (error) throw new Error(error.message || 'Failed to add podcast')
-  return data  // { podcast_id }
+  if (!resp.ok) {
+    const err = await resp.text()
+    throw new Error(err || 'Failed to add podcast')
+  }
+  return resp.json()  // { podcast_id }
 }
 
 /** Format a URL-like query detection — returns true if looks like a URL */
