@@ -5,23 +5,9 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 const SUPABASE_URL  = 'https://ymbrhochaudjrbrrlwyz.supabase.co'
-const SUPABASE_ANON = 'sb_publishable_PTQzs8c8ww4u-mAN4SD2ng_BvVE8dd9'
+const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InltYnJob2NoYXVkanJicnJsd3l6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM5MjIwODAsImV4cCI6MjA4OTQ5ODA4MH0.fMhoiI3qEoUhR1K6CXZqv7wtaw6jvsufEEJDI2HX7A8'
 
-// The sb_publishable_ key must NOT be sent as a Bearer token to the
-// REST/PostgREST API, but Edge Functions still need it for gateway auth.
-function customFetch(url, options = {}) {
-  const headers = new Headers(options.headers)
-  const auth = headers.get('Authorization')
-  const isEdgeFunction = typeof url === 'string' && url.includes('/functions/v1/')
-  if (auth === `Bearer ${SUPABASE_ANON}` && !isEdgeFunction) {
-    headers.delete('Authorization')
-  }
-  return fetch(url, { ...options, headers })
-}
-
-export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON, {
-  global: { fetch: customFetch }
-})
+export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON)
 
 // Base URL for Supabase Edge Functions
 export const FUNCTIONS_URL = `${SUPABASE_URL}/functions/v1`
