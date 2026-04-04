@@ -55,16 +55,24 @@
 
     <!-- Category filter removed — categories are for My Library only -->
 
-    <!-- Results -->
-    <div id="results-section">
-      <!-- Browsing DB podcasts by default -->
+    <!-- Suggestions (shown by default) -->
+    <div id="suggestions-section">
       <div class="section-header">
-        <span class="section-title" id="results-label">All Podcasts</span>
+        <span class="section-title">✨ Suggested For You</span>
+        <span class="text-muted text-sm" id="suggestions-count"></span>
+      </div>
+      <div id="suggestions-grid" class="grid-4">
+        <div class="loading-state"><div class="spinner"></div> Finding podcasts you might like…</div>
+      </div>
+    </div>
+
+    <!-- Search Results (shown when searching) -->
+    <div id="results-section" class="hidden">
+      <div class="section-header">
+        <span class="section-title" id="results-label">Search Results</span>
         <span class="text-muted text-sm" id="results-count"></span>
       </div>
-      <div id="results-grid" class="grid-4">
-        <div class="loading-state"><div class="spinner"></div> Loading…</div>
-      </div>
+      <div id="results-grid" class="grid-4"></div>
     </div>
 
   </div>
@@ -88,28 +96,23 @@
   })
 
   let currentUser = null
-  let allPodcasts = []
   let activePlatform = ''
-  let searchResults  = null   // null = showing DB, array = showing search results
+  let searchResults  = null
+  let subscribedIds  = new Set()
 
   async function init() {
     await initNav('browse')
     await initNotificationDropdown()
     currentUser = await getCurrentUser()
-    if (currentUser) initShareModal()
-
-    const { data: podData } = await supabase.from('podcasts').select(`
-        id, title, author, artwork_url, platform, platform_id,
-        avg_platform_likes,
-        podcast_likes(count),
-        subscriptions(count)
-      `).order('created_at', { ascending: false })
-
-    allPodcasts = (podData || []).map(p => ({
-      ...p,
-      like_count: p.podcast_likes?.[0]?.count || 0,
-      sub_count:  p.subscriptions?.[0]?.count  || 0
-    }))
+    if (currentUser) {
+      initShareModal()
+      // Load user's subscribed podcast IDs so we can exclude them from suggestions
+      const { data: subs } = await supabase
+        .from('subscriptions')
+        .select('podcast_id')
+        .eq('user_id', currentUser.id)
+      subscribedIds = new Set((subs || []).map(s => s.podcast_id))
+    }
 
     // Handle URL params: ?q=query
     const params = new URLSearchParams(location.search)
@@ -119,8 +122,81 @@
       document.getElementById('search-input').value = urlQuery
       await doSearch()
     } else {
-      renderGrid(allPodcasts)
+      await loadSuggestions()
     }
+  }
+
+  async function loadSuggestions() {
+    const sugGrid = document.getElementById('suggestions-grid')
+    document.getElementById('suggestions-section').classList.remove('hidden')
+    document.getElementById('results-section').classList.add('hidden')
+
+    if (!currentUser || subscribedIds.size === 0) {
+      // No subscriptions yet — show popular/trending searches
+      sugGrid.innerHTML = `<div class="empty-state" style="grid-column:1/-1">
+        <div class="empty-icon">🎙️</div>
+        <h3>Follow some podcasts first!</h3>
+        <p>Search above to find podcasts, then we'll suggest similar ones here</p>
+      </div>`
+      document.getElementById('suggestions-count').textContent = ''
+      return
+    }
+
+    // Get subscribed podcast titles to build suggestion queries
+    const { data: myPodcasts } = await supabase
+      .from('subscriptions')
+      .select('podcasts(title, author, platform)')
+      .eq('user_id', currentUser.id)
+
+    const titles = (myPodcasts || []).map(s => s.podcasts?.title).filter(Boolean)
+    if (!titles.length) {
+      sugGrid.innerHTML = `<div class="empty-state" style="grid-column:1/-1">
+        <div class="empty-icon">🎙️</div>
+        <h3>Add some podcasts first</h3>
+        <p>Search above to find podcasts you like</p>
+      </div>`
+      return
+    }
+
+    // Search for similar podcasts based on each subscription
+    // Use keywords from titles to find related content
+    const allSuggestions = []
+    const seenIds = new Set()
+
+    for (const title of titles.slice(0, 5)) {
+      // Extract key terms (skip common words)
+      const terms = title.replace(/[^a-zA-Z0-9\s]/g, '').split(/\s+/)
+        .filter(w => w.length > 3 && !['with','podcast','the','and','show','episode'].includes(w.toLowerCase()))
+        .slice(0, 3).join(' ')
+
+      if (!terms) continue
+
+      try {
+        const results = await searchPodcasts(terms + ' podcast', { limit: 8 })
+        for (const r of results) {
+          const key = r.platform_id || r.title
+          // Skip already subscribed or already suggested
+          if (subscribedIds.has(r.id) || seenIds.has(key)) continue
+          seenIds.add(key)
+          allSuggestions.push(r)
+        }
+      } catch (e) { /* skip failed searches */ }
+    }
+
+    if (!allSuggestions.length) {
+      sugGrid.innerHTML = `<div class="empty-state" style="grid-column:1/-1">
+        <div class="empty-icon">🔍</div>
+        <h3>No new suggestions right now</h3>
+        <p>Try searching for specific podcasts above</p>
+      </div>`
+      document.getElementById('suggestions-count').textContent = ''
+      return
+    }
+
+    // Show up to 20 suggestions
+    const top = allSuggestions.slice(0, 20)
+    document.getElementById('suggestions-count').textContent = `${top.length} suggestions`
+    renderGrid(top, sugGrid)
   }
 
   document.getElementById('platform-filter').addEventListener('click', (e) => {
@@ -133,20 +209,24 @@
   })
 
   function applyFilters() {
-    const source = searchResults || allPodcasts
-    let filtered = source
+    if (!searchResults) return
+    let filtered = searchResults
     if (activePlatform) filtered = filtered.filter(p => p.platform === activePlatform)
-    renderGrid(filtered)
+    renderGrid(filtered, document.getElementById('results-grid'))
   }
 
   async function doSearch() {
     const q = document.getElementById('search-input').value.trim()
     if (!q) {
       searchResults = null
-      document.getElementById('results-label').textContent = 'All Podcasts'
-      applyFilters()
+      document.getElementById('results-section').classList.add('hidden')
+      document.getElementById('suggestions-section').classList.remove('hidden')
       return
     }
+
+    // Show results section, hide suggestions
+    document.getElementById('suggestions-section').classList.add('hidden')
+    document.getElementById('results-section').classList.remove('hidden')
 
     const resultsGrid = document.getElementById('results-grid')
     const label       = document.getElementById('results-label')
@@ -169,9 +249,7 @@
     if (e.key === 'Enter') doSearch()
   })
 
-  function renderGrid(podcasts) {
-    const grid = document.getElementById('results-grid')
-    document.getElementById('results-count').textContent = `${podcasts.length} podcast${podcasts.length !== 1 ? 's' : ''}`
+  function renderGrid(podcasts, grid = document.getElementById('results-grid')) {
 
     if (!podcasts.length) {
       grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1">
