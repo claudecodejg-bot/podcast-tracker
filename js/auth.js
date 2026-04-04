@@ -89,6 +89,8 @@ export async function initNav(activePage) {
     authBtn.addEventListener('click', signOut)
     // Load unread share count
     loadUnreadCount()
+    // Inject People link into nav
+    injectPeopleLink()
     // Inject Profile link into nav if not already there
     injectProfileLink()
     // Inject Admin link for admin users
@@ -97,6 +99,15 @@ export async function initNav(activePage) {
     authBtn.textContent = 'Sign In'
     authBtn.addEventListener('click', () => { window.location.href = 'login.html' })
   }
+}
+
+/** Adds a "People" item to the nav center list when signed in. */
+function injectPeopleLink() {
+  const navCenter = document.querySelector('.nav-center')
+  if (!navCenter || navCenter.querySelector('[data-page="people"]')) return
+  const li = document.createElement('li')
+  li.innerHTML = `<a href="people.html" data-page="people">People</a>`
+  navCenter.appendChild(li)
 }
 
 /** Adds a "Profile" item to the nav center list when signed in. */
@@ -129,7 +140,7 @@ async function injectAdminLink() {
   navCenter.appendChild(li)
 }
 
-/** Loads unread share count and updates the notification badge. */
+/** Loads unread notification count and updates the nav badge. */
 async function loadUnreadCount() {
   const { data: user } = await supabase
     .from('users')
@@ -139,10 +150,11 @@ async function loadUnreadCount() {
 
   if (!user) return
 
+  // Count unread notifications (replaces old shares-only count)
   const { count } = await supabase
-    .from('shares')
+    .from('notifications')
     .select('id', { count: 'exact', head: true })
-    .eq('recipient_id', user.id)
+    .eq('user_id', user.id)
     .is('read_at', null)
 
   const badge = document.getElementById('nav-notification-badge')

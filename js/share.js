@@ -101,13 +101,13 @@ async function sendShare() {
   sendBtn.textContent = 'Sending…'
   alertEl.className = 'alert hidden'
 
-  const { error } = await supabase.from('shares').insert({
+  const { data: shareData, error } = await supabase.from('shares').insert({
     sender_id:    currentUser.id,
     recipient_id: recipientId,
     podcast_id:   podcastId || null,
     episode_id:   episodeId || null,
     message:      message || null
-  })
+  }).select('id').single()
 
   sendBtn.disabled = false
   sendBtn.textContent = 'Send'
@@ -117,6 +117,19 @@ async function sendShare() {
     alertEl.className = 'alert alert-error'
     return
   }
+
+  // Create notification for recipient
+  const title = document.getElementById('share-modal-title').textContent.replace('Share: ', '')
+  await supabase.from('notifications').insert({
+    user_id:            recipientId,
+    type:               'new_share',
+    title:              `${currentUser.full_name} shared "${title}" with you`,
+    body:               message || null,
+    link:               episodeId ? `episode.html?id=${episodeId}` : (podcastId ? `podcast.html?id=${podcastId}` : 'library.html#shared'),
+    related_user_id:    currentUser.id,
+    related_episode_id: episodeId || null,
+    related_share_id:   shareData?.id || null
+  })
 
   alertEl.textContent = 'Shared!'
   alertEl.className = 'alert alert-success'

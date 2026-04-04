@@ -202,20 +202,56 @@ export function renderHistogram(container, histogram, totalCount) {
 
 /**
  * Log an episode as listened (diary entry).
+ * Also triggers the listen-confirmation loop: if this episode was
+ * shared with the user, marks the share as listened and notifies
+ * the original sharer.
+ *
  * @param {string} episodeId
- * @param {object} opts  { listenedOn, review, rating }
+ * @param {object} opts  { listenedOn, review, rating, reaction }
  */
-export async function logEpisode(episodeId, { listenedOn, review = null, rating = null } = {}) {
+export async function logEpisode(episodeId, { listenedOn, review = null, rating = null, reaction = null } = {}) {
   const user = await getCurrentUser()
   if (!user) return { error: 'Not logged in' }
 
-  return supabase.from('listening_log').insert({
+  const result = await supabase.from('listening_log').insert({
     user_id:     user.id,
     episode_id:  episodeId,
     listened_on: listenedOn || new Date().toISOString().slice(0, 10),
     review,
     rating
   })
+
+  // Listen-confirmation loop: check if this episode was shared with us
+  const { data: pendingShares } = await supabase
+    .from('shares')
+    .select('id, sender_id, episodes(id, title)')
+    .eq('recipient_id', user.id)
+    .eq('episode_id', episodeId)
+    .is('listened_at', null)
+
+  if (pendingShares?.length) {
+    for (const share of pendingShares) {
+      // Mark share as listened
+      const updateData = { listened_at: new Date().toISOString() }
+      if (reaction) updateData.listener_reaction = reaction
+      await supabase.from('shares').update(updateData).eq('id', share.id)
+
+      // Create notification for the original sharer
+      const reactionText = reaction ? ` ${reaction}` : ''
+      await supabase.from('notifications').insert({
+        user_id:            share.sender_id,
+        type:               'share_listened',
+        title:              `🎧 ${user.full_name} listened to your recommendation!${reactionText}`,
+        body:               share.episodes?.title || '',
+        link:               `episode.html?id=${episodeId}`,
+        related_user_id:    user.id,
+        related_episode_id: episodeId,
+        related_share_id:   share.id
+      })
+    }
+  }
+
+  return result
 }
 
 /**

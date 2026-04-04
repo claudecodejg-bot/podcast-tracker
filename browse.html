@@ -79,6 +79,7 @@
   import { initNav, getCurrentUser } from './js/auth.js'
   import { searchPodcasts, parseUrl, addPodcast, platformBadge, looksLikeUrl } from './js/search.js'
   import { initShareModal } from './js/share.js'
+  import { initNotificationDropdown } from './js/notifications.js'
 
   document.getElementById('footer-year').textContent = new Date().getFullYear()
 
@@ -96,6 +97,7 @@
 
   async function init() {
     await initNav('browse')
+    await initNotificationDropdown()
     currentUser = await getCurrentUser()
     if (currentUser) initShareModal()
 

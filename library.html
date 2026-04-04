@@ -96,6 +96,7 @@
   import { platformBadge, rankBadge, formatDate, formatDuration, formatCount } from './js/search.js'
   import { initShareModal, openShareModal } from './js/share.js'
   import { renderStars, getMyLog, getMyQueue, removeFromQueue } from './js/ratings.js'
+  import { initNotificationDropdown } from './js/notifications.js'
 
   document.getElementById('footer-year').textContent = new Date().getFullYear()
   document.getElementById('nav-hamburger').addEventListener('click', () => {
@@ -111,6 +112,7 @@
     if (!session) return
 
     await initNav('library')
+    await initNotificationDropdown()
     currentUser = await getCurrentUser()
     await initShareModal()
 

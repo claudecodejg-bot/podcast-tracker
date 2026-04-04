@@ -104,6 +104,7 @@
   import { initNav } from './js/auth.js'
   import { platformBadge, rankBadge, formatDate } from './js/search.js'
   import { renderStars } from './js/ratings.js'
+  import { initNotificationDropdown } from './js/notifications.js'
 
   document.getElementById('footer-year').textContent = new Date().getFullYear()
   document.getElementById('nav-hamburger').addEventListener('click', () => {
@@ -121,6 +122,7 @@
 
   async function init() {
     await initNav('home')
+    await initNotificationDropdown()
     await Promise.all([loadTrending(), loadMostLoved(), loadSummarized(), loadCategories(), loadActivity()])
   }
 

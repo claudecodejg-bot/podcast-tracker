@@ -54,6 +54,17 @@
         <label style="display:block;font-size:.82rem;color:var(--text-muted);margin-bottom:.3rem">Rating (optional)</label>
         <div id="log-star-mount" style="display:flex;align-items:center;gap:.25rem"></div>
       </div>
+      <!-- Reaction row (shown only if episode was shared with user) -->
+      <div id="log-reaction-row" class="hidden">
+        <label style="display:block;font-size:.82rem;color:var(--text-muted);margin-bottom:.3rem" id="log-reaction-label">React to this recommendation:</label>
+        <div class="reaction-picker" id="log-reaction-picker">
+          <button type="button" class="reaction-btn" data-reaction="👍">👍</button>
+          <button type="button" class="reaction-btn" data-reaction="🔥">🔥</button>
+          <button type="button" class="reaction-btn" data-reaction="😐">😐</button>
+          <button type="button" class="reaction-btn" data-reaction="🎯">🎯</button>
+          <button type="button" class="reaction-btn" data-reaction="❤️">❤️</button>
+        </div>
+      </div>
       <div>
         <label style="display:block;font-size:.82rem;color:var(--text-muted);margin-bottom:.3rem">Quick review (optional)</label>
         <textarea id="log-review-input" class="search-input" placeholder="What did you think?" style="width:100%;box-sizing:border-box;min-height:80px;resize:vertical"></textarea>
@@ -76,6 +87,7 @@
     getEpisodeRatingStats, renderHistogram, renderStars, formatRating,
     logEpisode, addToQueue, isInQueue
   } from './js/ratings.js'
+  import { initNotificationDropdown } from './js/notifications.js'
 
   document.getElementById('footer-year').textContent = new Date().getFullYear()
   document.getElementById('nav-hamburger').addEventListener('click', () => {
@@ -96,9 +108,11 @@
   let ratingStats  = null
   let inQueue      = false
   let starWidget   = null
+  let pendingShare = null  // share record if episode was shared to this user
 
   async function init() {
     await initNav()
+    await initNotificationDropdown()
     currentUser = await getCurrentUser()
     isAdmin = currentUser?.is_admin || false
     if (currentUser) await initShareModal()
@@ -146,6 +160,19 @@
         getUserRating(episodeId),
         isInQueue({ episodeId })
       ])
+    }
+
+    // Check if this episode was shared with the current user (unlistened)
+    if (currentUser) {
+      const { data: share } = await supabase
+        .from('shares')
+        .select('id, sender_id, users!shares_sender_id_fkey(full_name)')
+        .eq('recipient_id', currentUser.id)
+        .eq('episode_id', episodeId)
+        .is('listened_at', null)
+        .limit(1)
+        .maybeSingle()
+      pendingShare = share || null
     }
 
     document.title = `${ep.title} — Pod Tracker`
@@ -365,6 +392,25 @@
     // Mount star widget in modal
     const mount = document.getElementById('log-star-mount')
     logStarWidget = mountStarWidget(mount, { episodeId, readonly: false })
+
+    // Show reaction row if episode was shared with user
+    const reactionRow = document.getElementById('log-reaction-row')
+    if (pendingShare) {
+      reactionRow.classList.remove('hidden')
+      const sharerName = pendingShare.users?.full_name || 'Someone'
+      document.getElementById('log-reaction-label').textContent = `React to ${sharerName}'s recommendation:`
+    } else {
+      reactionRow.classList.add('hidden')
+    }
+
+    // Wire reaction buttons (toggle active, one at a time)
+    document.querySelectorAll('#log-reaction-picker .reaction-btn').forEach(btn => {
+      btn.classList.remove('active')
+      btn.onclick = () => {
+        document.querySelectorAll('#log-reaction-picker .reaction-btn').forEach(b => b.classList.remove('active'))
+        btn.classList.add('active')
+      }
+    })
   }
 
   document.getElementById('log-modal-close').addEventListener('click', () => document.getElementById('log-modal').classList.add('hidden'))
@@ -374,10 +420,12 @@
     btn.disabled = true
     btn.textContent = 'Saving…'
 
+    const activeReaction = document.querySelector('#log-reaction-picker .reaction-btn.active')
     await logEpisode(episodeId, {
       listenedOn: document.getElementById('log-date-input').value,
       review:     document.getElementById('log-review-input').value.trim() || null,
-      rating:     logStarWidget?.getValue() || null
+      rating:     logStarWidget?.getValue() || null,
+      reaction:   activeReaction?.dataset.reaction || null
     })
 
     // Also save the star rating to the main ratings table if provided

@@ -42,6 +42,7 @@
   import { initNav, getCurrentUser } from './js/auth.js'
   import { platformBadge, formatDate } from './js/search.js'
   import { renderStars }         from './js/ratings.js'
+  import { initNotificationDropdown } from './js/notifications.js'
 
   document.getElementById('footer-year').textContent = new Date().getFullYear()
   document.getElementById('nav-hamburger').addEventListener('click', () => {
@@ -56,6 +57,7 @@
 
   async function init() {
     await initNav(null)
+    await initNotificationDropdown()
     me = await getCurrentUser()
 
     const { data: list } = await supabase

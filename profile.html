@@ -40,6 +40,13 @@
       <div class="profile-meta">
         <h1 id="profile-name"></h1>
         <div class="profile-stats" id="profile-stats"></div>
+        <div id="follow-stats" class="hidden" style="display:flex;gap:1rem;margin-top:.5rem;font-size:.88rem">
+          <a href="#" id="followers-link" style="color:var(--text)"><strong id="followers-count">0</strong> <span class="text-muted">followers</span></a>
+          <a href="#" id="following-link" style="color:var(--text)"><strong id="following-count">0</strong> <span class="text-muted">following</span></a>
+        </div>
+        <div id="follow-btn-wrap" class="hidden" style="margin-top:.75rem">
+          <button class="follow-btn" id="follow-btn">Follow</button>
+        </div>
         <div id="own-profile-actions" class="hidden" style="margin-top:.75rem">
           <a href="library.html" class="btn btn-sm btn-outline">My Library</a>
         </div>
@@ -151,6 +158,17 @@
   </div>
 </div>
 
+<!-- Followers/Following Modal -->
+<div id="follows-modal" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="follows-modal-title">Followers</h3>
+      <button class="modal-close" id="follows-modal-close">✕</button>
+    </div>
+    <div id="follows-modal-list" class="followers-modal-list"></div>
+  </div>
+</div>
+
 <footer>Pod Tracker &copy; <span id="footer-year"></span></footer>
 
 <script type="module">
@@ -158,6 +176,7 @@
   import { initNav, getCurrentUser } from './js/auth.js'
   import { renderStars, renderHistogram, formatRating } from './js/ratings.js'
   import { platformBadge, formatDate } from './js/search.js'
+  import { initNotificationDropdown } from './js/notifications.js'
 
   document.getElementById('footer-year').textContent = new Date().getFullYear()
   document.getElementById('nav-hamburger').addEventListener('click', () => {
@@ -186,6 +205,7 @@
 
   async function init() {
     await initNav(null)
+    await initNotificationDropdown()
     me = await getCurrentUser()
 
     // If no ?user param, show own profile (requires login)
@@ -229,6 +249,7 @@
 
     await Promise.all([
       loadStats(user),
+      loadFollowData(),
       loadFavorites(),
       loadRecentActivity(),
       loadRatings(),
@@ -269,6 +290,114 @@
       <span class="stat-chip">📻 ${subCount || 0} subscribed</span>
       <span class="stat-chip">✍️ ${ratCount || 0} rated</span>
     `
+  }
+
+  // ---- Follow System ----
+  let isFollowing = false
+
+  async function loadFollowData() {
+    const [{ count: followersCount }, { count: followingCount }] = await Promise.all([
+      supabase.from('user_follows').select('id', { count: 'exact', head: true }).eq('following_id', userId),
+      supabase.from('user_follows').select('id', { count: 'exact', head: true }).eq('follower_id', userId)
+    ])
+
+    document.getElementById('followers-count').textContent = followersCount || 0
+    document.getElementById('following-count').textContent = followingCount || 0
+    document.getElementById('follow-stats').classList.remove('hidden')
+
+    // Wire follower/following links
+    document.getElementById('followers-link').addEventListener('click', (e) => { e.preventDefault(); showFollowsModal('followers') })
+    document.getElementById('following-link').addEventListener('click', (e) => { e.preventDefault(); showFollowsModal('following') })
+    document.getElementById('follows-modal-close').addEventListener('click', () => document.getElementById('follows-modal').classList.add('hidden'))
+
+    // Show follow button for other users
+    if (me && !isOwn) {
+      const { data: existing } = await supabase
+        .from('user_follows')
+        .select('id')
+        .eq('follower_id', me.id)
+        .eq('following_id', userId)
+        .maybeSingle()
+
+      isFollowing = !!existing
+      updateFollowBtn()
+      document.getElementById('follow-btn-wrap').classList.remove('hidden')
+      document.getElementById('follow-btn').addEventListener('click', toggleFollow)
+    }
+  }
+
+  function updateFollowBtn() {
+    const btn = document.getElementById('follow-btn')
+    btn.textContent = isFollowing ? 'Following' : 'Follow'
+    btn.classList.toggle('following', isFollowing)
+  }
+
+  async function toggleFollow() {
+    if (!me) { location.href = 'login.html'; return }
+    const btn = document.getElementById('follow-btn')
+    btn.disabled = true
+
+    if (isFollowing) {
+      await supabase.from('user_follows').delete()
+        .eq('follower_id', me.id).eq('following_id', userId)
+      isFollowing = false
+      const el = document.getElementById('followers-count')
+      el.textContent = Math.max(0, Number(el.textContent) - 1)
+    } else {
+      await supabase.from('user_follows').insert({ follower_id: me.id, following_id: userId })
+      isFollowing = true
+      const el = document.getElementById('followers-count')
+      el.textContent = Number(el.textContent) + 1
+      // Create notification for followed user
+      await supabase.from('notifications').insert({
+        user_id: userId,
+        type: 'new_follower',
+        title: `${me.full_name} started following you`,
+        link: `profile.html?user=${me.id}`,
+        related_user_id: me.id
+      })
+    }
+
+    btn.disabled = false
+    updateFollowBtn()
+  }
+
+  async function showFollowsModal(mode) {
+    const modal = document.getElementById('follows-modal')
+    const title = document.getElementById('follows-modal-title')
+    const list  = document.getElementById('follows-modal-list')
+    title.textContent = mode === 'followers' ? 'Followers' : 'Following'
+    list.innerHTML = '<div class="loading-state"><div class="spinner"></div></div>'
+    modal.classList.remove('hidden')
+
+    let users = []
+    if (mode === 'followers') {
+      const { data } = await supabase
+        .from('user_follows')
+        .select('follower_id, users!user_follows_follower_id_fkey(id, full_name)')
+        .eq('following_id', userId)
+      users = data?.map(d => d.users).filter(Boolean) || []
+    } else {
+      const { data } = await supabase
+        .from('user_follows')
+        .select('following_id, users!user_follows_following_id_fkey(id, full_name)')
+        .eq('follower_id', userId)
+      users = data?.map(d => d.users).filter(Boolean) || []
+    }
+
+    if (!users.length) {
+      list.innerHTML = `<div class="text-muted" style="text-align:center;padding:1rem">No ${mode} yet</div>`
+      return
+    }
+
+    list.innerHTML = users.map(u => {
+      const initials = u.full_name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
+      return `
+        <a href="profile.html?user=${u.id}" class="follower-row" style="text-decoration:none;color:var(--text)">
+          <div class="follower-avatar-sm">${initials}</div>
+          <span style="font-weight:600;font-size:.9rem">${escHtml(u.full_name)}</span>
+        </a>`
+    }).join('')
   }
 
   async function loadFavorites() {

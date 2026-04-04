@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>People — Pod Tracker</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<nav>
+  <a href="index.html" class="nav-brand">🎙️ <span>Pod</span>Tracker</a>
+  <ul class="nav-center">
+    <li><a href="index.html"   data-page="home">Home</a></li>
+    <li><a href="browse.html"  data-page="browse">Browse</a></li>
+    <li><a href="library.html" data-page="library">My Library</a></li>
+  </ul>
+  <div class="nav-right">
+    <div class="nav-notification">
+      <a href="library.html#shared" title="Notifications">🔔</a>
+      <span id="nav-notification-badge" class="hidden"></span>
+    </div>
+    <button id="nav-hamburger" aria-label="Menu">
+      <span></span><span></span><span></span>
+    </button>
+    <button id="nav-auth-btn"></button>
+  </div>
+</nav>
+
+<main>
+  <div class="container" style="max-width:900px;padding-top:2rem">
+    <h1 style="font-size:1.5rem;font-weight:800;margin-bottom:1.5rem">👥 People</h1>
+    <div id="people-grid" class="people-grid">
+      <div class="loading-state" style="grid-column:1/-1"><div class="spinner"></div> Loading…</div>
+    </div>
+  </div>
+</main>
+
+<footer>Pod Tracker &copy; <span id="footer-year"></span></footer>
+
+<script type="module">
+  import { supabase } from './js/supabase-client.js'
+  import { initNav, getCurrentUser } from './js/auth.js'
+  import { initNotificationDropdown } from './js/notifications.js'
+
+  document.getElementById('footer-year').textContent = new Date().getFullYear()
+  document.getElementById('nav-hamburger').addEventListener('click', () => {
+    document.querySelector('.nav-center').classList.toggle('open')
+  })
+
+  let me = null
+
+  async function init() {
+    await initNav('people')
+    await initNotificationDropdown()
+    me = await getCurrentUser()
+    await loadPeople()
+  }
+
+  async function loadPeople() {
+    const grid = document.getElementById('people-grid')
+
+    // Fetch all users
+    const { data: users } = await supabase
+      .from('users')
+      .select('id, full_name')
+      .order('full_name')
+
+    if (!users?.length) {
+      grid.innerHTML = '<div class="empty-state" style="grid-column:1/-1"><h3>No users yet</h3></div>'
+      return
+    }
+
+    // Fetch stats in parallel
+    const userIds = users.map(u => u.id)
+
+    const [{ data: logCounts }, { data: ratingCounts }, { data: myFollows }] = await Promise.all([
+      supabase.from('listening_log').select('user_id').in('user_id', userIds),
+      supabase.from('episode_ratings').select('user_id').in('user_id', userIds),
+      me ? supabase.from('user_follows').select('following_id').eq('follower_id', me.id) : { data: [] }
+    ])
+
+    // Count per user
+    const logMap = {}
+    logCounts?.forEach(r => { logMap[r.user_id] = (logMap[r.user_id] || 0) + 1 })
+    const ratMap = {}
+    ratingCounts?.forEach(r => { ratMap[r.user_id] = (ratMap[r.user_id] || 0) + 1 })
+    const followSet = new Set((myFollows || []).map(f => f.following_id))
+
+    grid.innerHTML = users.map(u => {
+      const initials = u.full_name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
+      const isSelf = me && me.id === u.id
+      const isFollowing = followSet.has(u.id)
+      return `
+        <div class="person-card" data-user-id="${u.id}">
+          <a href="profile.html?user=${u.id}" style="text-decoration:none;color:inherit;display:flex;flex-direction:column;align-items:center;gap:.5rem">
+            <div class="person-avatar">${initials}</div>
+            <div class="person-name">${escHtml(u.full_name)}</div>
+          </a>
+          <div class="person-stats">
+            <span>🎧 ${logMap[u.id] || 0}</span>
+            <span>⭐ ${ratMap[u.id] || 0}</span>
+          </div>
+          ${!isSelf && me ? `
+            <button class="follow-btn ${isFollowing ? 'following' : ''}" data-uid="${u.id}">
+              ${isFollowing ? 'Following' : 'Follow'}
+            </button>` : ''}
+        </div>`
+    }).join('')
+
+    // Wire follow buttons
+    grid.querySelectorAll('.follow-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const uid = btn.dataset.uid
+        btn.disabled = true
+
+        if (btn.classList.contains('following')) {
+          await supabase.from('user_follows').delete()
+            .eq('follower_id', me.id).eq('following_id', uid)
+          btn.classList.remove('following')
+          btn.textContent = 'Follow'
+        } else {
+          await supabase.from('user_follows').insert({ follower_id: me.id, following_id: uid })
+          btn.classList.add('following')
+          btn.textContent = 'Following'
+          // Create notification
+          await supabase.from('notifications').insert({
+            user_id: uid,
+            type: 'new_follower',
+            title: `${me.full_name} started following you`,
+            link: `profile.html?user=${me.id}`,
+            related_user_id: me.id
+          })
+        }
+
+        btn.disabled = false
+      })
+    })
+  }
+
+  function escHtml(str) {
+    return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
+  }
+
+  init()
+</script>
+</body>
+</html>
