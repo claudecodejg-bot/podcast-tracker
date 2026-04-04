@@ -53,8 +53,7 @@
       <button class="filter-chip" data-platform="rss">📡 RSS</button>
     </div>
 
-    <!-- Category filter -->
-    <div id="category-filter" class="filter-bar mb-2"></div>
+    <!-- Category filter removed — categories are for My Library only -->
 
     <!-- Results -->
     <div id="results-section">
@@ -89,10 +88,8 @@
   })
 
   let currentUser = null
-  let categories  = []
   let allPodcasts = []
   let activePlatform = ''
-  let activeCategory = ''
   let searchResults  = null   // null = showing DB, array = showing search results
 
   async function init() {
@@ -101,65 +98,29 @@
     currentUser = await getCurrentUser()
     if (currentUser) initShareModal()
 
-    const [catsRes, podRes] = await Promise.all([
-      supabase.from('categories').select('*').order('sort_order'),
-      supabase.from('podcasts').select(`
+    const { data: podData } = await supabase.from('podcasts').select(`
         id, title, author, artwork_url, platform, platform_id,
         avg_platform_likes,
         podcast_likes(count),
         subscriptions(count)
       `).order('created_at', { ascending: false })
-    ])
 
-    categories  = catsRes.data || []
-    allPodcasts = (podRes.data || []).map(p => ({
+    allPodcasts = (podData || []).map(p => ({
       ...p,
       like_count: p.podcast_likes?.[0]?.count || 0,
       sub_count:  p.subscriptions?.[0]?.count  || 0
     }))
 
-    buildCategoryFilter()
-
-    // Handle URL params: ?q=query or ?cat=categoryId
+    // Handle URL params: ?q=query
     const params = new URLSearchParams(location.search)
     const urlQuery = params.get('q')
-    const urlCat   = params.get('cat')
 
     if (urlQuery) {
       document.getElementById('search-input').value = urlQuery
       await doSearch()
-    } else if (urlCat) {
-      activeCategory = urlCat
-      // Activate the matching chip
-      const chip = document.querySelector(`#category-filter [data-cat="${urlCat}"]`)
-      if (chip) {
-        document.querySelectorAll('#category-filter .filter-chip').forEach(b => b.classList.remove('active'))
-        chip.classList.add('active')
-      }
-      applyFilters()
     } else {
       renderGrid(allPodcasts)
     }
-  }
-
-  function buildCategoryFilter() {
-    const bar = document.getElementById('category-filter')
-    bar.innerHTML = `<button class="filter-chip active" data-cat="">All Categories</button>`
-    for (const c of categories) {
-      const btn = document.createElement('button')
-      btn.className = 'filter-chip'
-      btn.dataset.cat = c.id
-      btn.textContent = `${c.icon} ${c.name}`
-      bar.appendChild(btn)
-    }
-    bar.addEventListener('click', (e) => {
-      const chip = e.target.closest('[data-cat]')
-      if (!chip) return
-      bar.querySelectorAll('.filter-chip').forEach(b => b.classList.remove('active'))
-      chip.classList.add('active')
-      activeCategory = chip.dataset.cat
-      applyFilters()
-    })
   }
 
   document.getElementById('platform-filter').addEventListener('click', (e) => {
@@ -175,7 +136,6 @@
     const source = searchResults || allPodcasts
     let filtered = source
     if (activePlatform) filtered = filtered.filter(p => p.platform === activePlatform)
-    if (activeCategory) filtered = filtered.filter(p => p.category_id === activeCategory)
     renderGrid(filtered)
   }
 

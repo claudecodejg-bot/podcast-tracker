@@ -73,16 +73,6 @@
       </div>
     </div>
 
-    <!-- Browse by category -->
-    <div class="mt-3">
-      <div class="section-header">
-        <span class="section-title">Browse by Category</span>
-      </div>
-      <div id="category-grid" class="grid-4">
-        <div class="loading-state"><div class="spinner"></div></div>
-      </div>
-    </div>
-
     <!-- Group Activity Feed -->
     <div class="mt-3 mb-2">
       <div class="section-header">
@@ -123,7 +113,7 @@
   async function init() {
     await initNav('home')
     await initNotificationDropdown()
-    await Promise.all([loadTrending(), loadMostLoved(), loadSummarized(), loadCategories(), loadActivity()])
+    await Promise.all([loadTrending(), loadMostLoved(), loadSummarized(), loadActivity()])
   }
 
   async function loadTrending() {
@@ -241,19 +231,6 @@
           <span class="badge badge-new">✨ Summary</span>
         </a>`
     }).join('')
-  }
-
-  async function loadCategories() {
-    const { data: cats } = await supabase.from('categories').select('id, name, icon').order('sort_order').limit(12)
-
-    const grid = document.getElementById('category-grid')
-    if (!cats?.length) { grid.innerHTML = ''; return }
-
-    grid.innerHTML = cats.map(c => `
-      <a href="browse.html?cat=${c.id}" class="category-card">
-        <div class="cat-icon">${escHtml(c.icon)}</div>
-        <div class="cat-name">${escHtml(c.name)}</div>
-      </a>`).join('')
   }
 
   async function loadActivity() {
