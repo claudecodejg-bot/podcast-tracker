@@ -194,6 +194,18 @@
         </a>
       </div>
 
+      ${podcast?.platform === 'youtube' && episode.platform_episode_id ? `
+      <div class="card mt-2" style="padding:0;overflow:hidden;border-radius:12px">
+        <div style="position:relative;padding-bottom:56.25%;height:0">
+          <iframe
+            src="https://www.youtube.com/embed/${escHtml(episode.platform_episode_id)}?rel=0&modestbranding=1"
+            style="position:absolute;top:0;left:0;width:100%;height:100%;border:0;border-radius:12px"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            allowfullscreen
+          ></iframe>
+        </div>
+      </div>` : ''}
+
       <div class="card mt-2">
         <!-- Episode header -->
         <div style="display:flex;gap:1rem;align-items:flex-start">
@@ -217,7 +229,7 @@
 
         <!-- Action bar -->
         <div style="display:flex;gap:0.6rem;flex-wrap:wrap;align-items:center;margin-top:1rem;padding-top:0.75rem;border-top:1px solid var(--bg-elevated)">
-          ${episode.episode_url
+          ${episode.episode_url && podcast?.platform !== 'youtube'
             ? `<a href="${escHtml(episode.episode_url)}" target="_blank" class="btn btn-primary btn-sm">▶ Listen</a>`
             : ''
           }
