@@ -45,6 +45,9 @@
 
     <!-- Feed tab -->
     <div id="tab-feed">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:0.5rem">
+        <button id="refresh-episodes-btn" class="btn btn-outline btn-sm" title="Check for new episodes">🔄 Refresh</button>
+      </div>
       <div id="feed-list">
         <div class="loading-state"><div class="spinner"></div> Loading episodes…</div>
       </div>
@@ -91,7 +94,7 @@
 <div id="share-modal-container"></div>
 
 <script type="module">
-  import { supabase } from './js/supabase-client.js'
+  import { supabase, FUNCTIONS_URL } from './js/supabase-client.js'
   import { requireLogin, getCurrentUser, initNav } from './js/auth.js'
   import { platformBadge, rankBadge, formatDate, formatDuration, formatCount } from './js/search.js'
   import { initShareModal, openShareModal } from './js/share.js'
@@ -123,6 +126,32 @@
     }
 
     await Promise.all([loadFeed(), loadPodcasts(), loadShared(), loadDiary(), loadQueue()])
+
+    // Wire up refresh button
+    document.getElementById('refresh-episodes-btn').addEventListener('click', async () => {
+      const btn = document.getElementById('refresh-episodes-btn')
+      btn.disabled = true
+      btn.textContent = '⏳ Refreshing…'
+      try {
+        const { data: { session } } = await supabase.auth.getSession()
+        const res = await fetch(`${FUNCTIONS_URL}/refresh-episodes`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session?.access_token || ''}`
+          },
+          body: '{}'
+        })
+        const result = await res.json()
+        const totalNew = (result.results || []).reduce((sum, r) => sum + (r.new_episodes || 0), 0)
+        btn.textContent = totalNew > 0 ? `✅ ${totalNew} new episode${totalNew !== 1 ? 's' : ''}!` : '✅ Up to date'
+        if (totalNew > 0) await loadFeed()
+      } catch (e) {
+        btn.textContent = '❌ Refresh failed'
+      }
+      btn.disabled = false
+      setTimeout(() => { btn.textContent = '🔄 Refresh' }, 3000)
+    })
   }
 
   // ----- Tab switching -----
