@@ -5,6 +5,54 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>My Library — Pod Tracker</title>
   <link rel="stylesheet" href="css/style.css">
+  <style>
+    .feed-toggle-btn {
+      padding: 0.35rem 0.75rem;
+      border: none;
+      background: transparent;
+      border-radius: 6px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      cursor: pointer;
+      color: var(--gray-600);
+      transition: all 0.15s;
+    }
+    .feed-toggle-btn.active {
+      background: var(--bg-card);
+      color: var(--text-primary);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+    .episode-row.played {
+      opacity: 0.5;
+    }
+    .episode-row.played:hover {
+      opacity: 0.8;
+    }
+    .played-badge {
+      font-size: 0.7rem;
+      color: var(--accent);
+      font-weight: 600;
+    }
+    .mark-played-btn {
+      background: none;
+      border: 1px solid var(--bg-elevated);
+      border-radius: 6px;
+      padding: 0.2rem 0.5rem;
+      font-size: 0.72rem;
+      cursor: pointer;
+      color: var(--gray-600);
+      white-space: nowrap;
+      transition: all 0.15s;
+    }
+    .mark-played-btn:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .mark-played-btn.is-played {
+      color: var(--accent);
+      border-color: var(--accent);
+    }
+  </style>
 </head>
 <body>
 
@@ -45,7 +93,11 @@
 
     <!-- Feed tab -->
     <div id="tab-feed">
-      <div style="display:flex;justify-content:flex-end;margin-bottom:0.5rem">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem">
+        <div class="feed-toggle" style="display:flex;gap:0.25rem;background:var(--bg-elevated);border-radius:8px;padding:2px">
+          <button class="feed-toggle-btn active" data-feed-mode="new">🆕 New <span id="new-count-badge"></span></button>
+          <button class="feed-toggle-btn" data-feed-mode="all">📚 All</button>
+        </div>
         <button id="refresh-episodes-btn" class="btn btn-outline btn-sm" title="Check for new episodes">🔄 Refresh</button>
       </div>
       <div id="feed-list">
@@ -109,6 +161,10 @@
   let currentUser      = null
   let userCategories   = []
   let activeCatFilter  = null  // null=All, ''=Uncategorized, uuid=specific cat
+  let feedMode         = 'new' // 'new' or 'all'
+  let feedEpisodes     = []    // cached episode list
+  let playedSet        = new Set()  // episode IDs the user has played
+  let likedSet         = new Set()  // episode IDs the user has liked
 
   async function init() {
     const session = await requireLogin()
@@ -152,6 +208,15 @@
       btn.disabled = false
       setTimeout(() => { btn.textContent = '🔄 Refresh' }, 3000)
     })
+
+    // Wire feed mode toggle (New / All)
+    document.querySelectorAll('.feed-toggle-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        feedMode = btn.dataset.feedMode
+        document.querySelectorAll('.feed-toggle-btn').forEach(b => b.classList.toggle('active', b.dataset.feedMode === feedMode))
+        renderFeed()
+      })
+    })
   }
 
   // ----- Tab switching -----
@@ -170,7 +235,6 @@
   async function loadFeed() {
     const list = document.getElementById('feed-list')
 
-    // Get subscribed podcast IDs
     const { data: subs } = await supabase
       .from('subscriptions')
       .select('podcast_id')
@@ -206,21 +270,40 @@
       return
     }
 
-    // Get user's episode likes
-    const epIds = episodes.map(e => e.id)
-    const { data: myLikes } = await supabase
-      .from('episode_likes')
-      .select('episode_id')
-      .eq('user_id', currentUser.id)
-      .in('episode_id', epIds)
+    feedEpisodes = episodes
 
-    const likedSet = new Set((myLikes || []).map(l => l.episode_id))
+    const epIds = episodes.map(e => e.id)
+    const [{ data: myLikes }, { data: myPlays }] = await Promise.all([
+      supabase.from('episode_likes').select('episode_id').eq('user_id', currentUser.id).in('episode_id', epIds),
+      supabase.from('episode_plays').select('episode_id').eq('user_id', currentUser.id).in('episode_id', epIds)
+    ])
+
+    likedSet = new Set((myLikes || []).map(l => l.episode_id))
+    playedSet = new Set((myPlays || []).map(p => p.episode_id))
+
+    renderFeed()
+  }
+
+  function renderFeed() {
+    const list = document.getElementById('feed-list')
+    const unplayed = feedEpisodes.filter(ep => !playedSet.has(ep.id))
+    const visibleEpisodes = feedMode === 'new' ? unplayed : feedEpisodes
+
+    document.getElementById('new-count-badge').textContent = unplayed.length ? `(${unplayed.length})` : ''
+
+    if (!visibleEpisodes.length) {
+      list.innerHTML = `<div class="empty-state">
+        <div class="empty-icon">${feedMode === 'new' ? '✅' : '🎙️'}</div>
+        <h3>${feedMode === 'new' ? 'All caught up!' : 'No episodes yet'}</h3>
+        <p>${feedMode === 'new' ? 'No new episodes right now. Switch to All to see your history.' : 'Episodes will appear here after the next sync'}</p>
+      </div>`
+      return
+    }
 
     list.innerHTML = `<div class="card" style="padding:0">` +
-      episodes.map(ep => feedEpisodeHTML(ep, likedSet.has(ep.id))).join('') +
+      visibleEpisodes.map(ep => feedEpisodeHTML(ep, likedSet.has(ep.id), playedSet.has(ep.id))).join('') +
       `</div>`
 
-    // Wire like buttons
     list.querySelectorAll('[data-like-ep]').forEach(btn => {
       btn.addEventListener('click', async (e) => {
         e.stopPropagation()
@@ -228,26 +311,52 @@
       })
     })
 
-    // Wire share buttons
     list.querySelectorAll('[data-share-ep]').forEach(btn => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation()
-        const ep = episodes.find(ep => ep.id === btn.dataset.shareEp)
+        const ep = feedEpisodes.find(ep => ep.id === btn.dataset.shareEp)
         if (ep) openShareModal({ episodeId: ep.id, title: ep.title })
+      })
+    })
+
+    list.querySelectorAll('[data-mark-played]').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation()
+        await togglePlayed(btn)
       })
     })
   }
 
-  function feedEpisodeHTML(ep, isLiked) {
+  async function togglePlayed(btn) {
+    const epId = btn.dataset.markPlayed
+    const isPlayed = playedSet.has(epId)
+
+    if (isPlayed) {
+      await supabase.from('episode_plays').delete()
+        .eq('user_id', currentUser.id)
+        .eq('episode_id', epId)
+      playedSet.delete(epId)
+    } else {
+      await supabase.from('episode_plays').upsert(
+        { user_id: currentUser.id, episode_id: epId },
+        { onConflict: 'user_id,episode_id' }
+      )
+      playedSet.add(epId)
+    }
+
+    renderFeed()
+  }
+
+  function feedEpisodeHTML(ep, isLiked, isPlayed) {
     const p = ep.podcasts
     return `
-      <div class="episode-row" style="cursor:pointer" onclick="location.href='episode.html?id=${ep.id}'">
+      <div class="episode-row ${isPlayed ? 'played' : ''}" style="cursor:pointer" onclick="location.href='episode.html?id=${ep.id}'">
         ${p?.artwork_url
           ? `<img src="${escHtml(p.artwork_url)}" alt="" style="width:44px;height:44px;border-radius:6px;object-fit:cover;flex-shrink:0">`
           : '<div style="width:44px;height:44px;border-radius:6px;background:var(--accent-light);display:flex;align-items:center;justify-content:center;font-size:1.2rem;flex-shrink:0">🎙️</div>'
         }
         <div class="episode-row-main">
-          <div style="font-size:0.78rem;color:var(--gray-600);margin-bottom:0.1rem">${escHtml(p?.title || '')}</div>
+          <div style="font-size:0.78rem;color:var(--gray-600);margin-bottom:0.1rem">${escHtml(p?.title || '')}${isPlayed ? ' <span class="played-badge">✓ Played</span>' : ''}</div>
           <div class="episode-row-title">${escHtml(ep.title)}</div>
           <div class="episode-row-meta">
             ${formatDate(ep.published_at)}
@@ -257,6 +366,9 @@
         </div>
         <div class="episode-row-actions">
           ${rankBadge(ep.likes_vs_avg)}
+          <button class="mark-played-btn ${isPlayed ? 'is-played' : ''}" data-mark-played="${ep.id}" title="${isPlayed ? 'Mark unplayed' : 'Mark played'}">
+            ${isPlayed ? '✅' : '⭕'}
+          </button>
           <button class="like-btn btn-sm ${isLiked?'liked':''}" data-like-ep="${ep.id}" data-liked="${isLiked}">
             ${isLiked?'❤️':'🤍'}
           </button>

@@ -107,6 +107,7 @@
   let myRating     = null
   let ratingStats  = null
   let inQueue      = false
+  let isPlayed     = false
   let starWidget   = null
   let pendingShare = null  // share record if episode was shared to this user
 
@@ -156,10 +157,14 @@
     // Fetch rating data
     ratingStats = await getEpisodeRatingStats(episodeId)
     if (currentUser) {
-      ;[myRating, inQueue] = await Promise.all([
+      const [{ data: play }, rating, queueState] = await Promise.all([
+        supabase.from('episode_plays').select('id').eq('user_id', currentUser.id).eq('episode_id', episodeId).maybeSingle(),
         getUserRating(episodeId),
         isInQueue({ episodeId })
       ])
+      isPlayed = !!play
+      myRating = rating
+      inQueue = queueState
     }
 
     // Check if this episode was shared with the current user (unlistened)
@@ -238,6 +243,7 @@
             <span id="ep-like-count">${epLikeCount}</span>
           </button>
           <button class="log-btn ${false?'logged':''}" id="log-ep-btn">📓 Log</button>
+          <button class="log-btn ${isPlayed?'logged':''}" id="played-ep-btn">${isPlayed?'✅ Played':'⭕ Mark Played'}</button>
           <button class="log-btn ${inQueue?'logged':''}" id="queue-ep-btn">${inQueue?'✅ Queued':'🎯 Queue'}</button>
           <button class="btn btn-secondary btn-sm" id="share-ep-btn">📤 Share</button>
           ${isAdmin && !episode.summary
@@ -316,6 +322,9 @@
     const logBtn = document.getElementById('log-ep-btn')
     if (logBtn) logBtn.addEventListener('click', () => openLogModal())
 
+    const playedBtn = document.getElementById('played-ep-btn')
+    if (playedBtn) playedBtn.addEventListener('click', togglePlayed)
+
     // Queue button
     const qBtn = document.getElementById('queue-ep-btn')
     if (qBtn) qBtn.addEventListener('click', toggleQueue)
@@ -368,6 +377,29 @@
     btn.classList.toggle('liked', isEpLiked)
     heart.textContent = isEpLiked ? '❤️' : '🤍'
     cnt.textContent = epLikeCount
+  }
+
+  async function togglePlayed() {
+    if (!currentUser) { window.location.href = 'login.html'; return }
+    const btn = document.getElementById('played-ep-btn')
+    btn.disabled = true
+
+    if (isPlayed) {
+      await supabase.from('episode_plays').delete()
+        .eq('user_id', currentUser.id)
+        .eq('episode_id', episodeId)
+      isPlayed = false
+    } else {
+      await supabase.from('episode_plays').upsert(
+        { user_id: currentUser.id, episode_id: episodeId },
+        { onConflict: 'user_id,episode_id' }
+      )
+      isPlayed = true
+    }
+
+    btn.disabled = false
+    btn.classList.toggle('logged', isPlayed)
+    btn.textContent = isPlayed ? '✅ Played' : '⭕ Mark Played'
   }
 
   async function toggleQueue() {
@@ -449,6 +481,19 @@
     document.getElementById('log-modal').classList.add('hidden')
     document.getElementById('log-ep-btn').classList.add('logged')
     document.getElementById('log-ep-btn').textContent = '📓 Logged!'
+
+    if (currentUser && !isPlayed) {
+      await supabase.from('episode_plays').upsert(
+        { user_id: currentUser.id, episode_id: episodeId },
+        { onConflict: 'user_id,episode_id' }
+      )
+      isPlayed = true
+      const playedBtn = document.getElementById('played-ep-btn')
+      if (playedBtn) {
+        playedBtn.classList.add('logged')
+        playedBtn.textContent = '✅ Played'
+      }
+    }
   })
 
   async function generateSummary() {
