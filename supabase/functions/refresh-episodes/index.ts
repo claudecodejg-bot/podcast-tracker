@@ -25,7 +25,8 @@ serve(async (req: Request) => {
 
   try {
     const body = req.method === 'POST' ? await req.json().catch(() => ({})) : {}
-    const { podcast_id } = body
+    const { podcast_id, backfill = false, since, max_pages = 6 } = body
+    const opts = { backfill: !!backfill, since, maxPages: max_pages }
 
     // Get podcasts to refresh
     let query = db.from('podcasts').select('id, platform, platform_id, feed_url, avg_platform_likes')
@@ -37,7 +38,7 @@ serve(async (req: Request) => {
     const results: any[] = []
     for (const podcast of podcasts || []) {
       try {
-        const result = await refreshPodcast(db, podcast)
+        const result = await refreshPodcast(db, podcast, opts)
         results.push({ podcast_id: podcast.id, ...result })
       } catch (err) {
         results.push({ podcast_id: podcast.id, error: String(err) })
@@ -51,7 +52,7 @@ serve(async (req: Request) => {
   }
 })
 
-async function refreshPodcast(db: any, podcast: any) {
+async function refreshPodcast(db: any, podcast: any, opts: any = {}) {
   const { id: podcastId, platform, platform_id, feed_url } = podcast
   let newEpisodes = 0
 
@@ -59,7 +60,7 @@ async function refreshPodcast(db: any, podcast: any) {
     if (platform_id.startsWith('playlist:')) {
       newEpisodes += await refreshYouTubePlaylist(db, podcastId, platform_id.replace('playlist:',''))
     } else {
-      newEpisodes += await refreshYouTubeChannel(db, podcastId, platform_id)
+      newEpisodes += await refreshYouTubeChannel(db, podcastId, platform_id, opts)
     }
     await updateLikesVsAvg(db, podcastId)
     await takeSnapshot(db, podcastId)
@@ -70,30 +71,54 @@ async function refreshPodcast(db: any, podcast: any) {
   return { new_episodes: newEpisodes }
 }
 
-async function refreshYouTubeChannel(db: any, podcastId: string, channelId: string) {
-  // Get the most recent episode we have
-  const { data: latest } = await db
-    .from('episodes')
-    .select('published_at, platform_episode_id')
-    .eq('podcast_id', podcastId)
-    .order('published_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
+async function refreshYouTubeChannel(db: any, podcastId: string, channelId: string, opts: any = {}) {
+  const { backfill = false, since, maxPages = 6 } = opts
 
-  const publishedAfter = latest?.published_at
-    ? new Date(new Date(latest.published_at).getTime() - 1000 * 60 * 60).toISOString()  // 1hr buffer
-    : undefined
+  // Normal mode: only fetch videos newer than what we have (cheap, for the cron).
+  // Backfill mode: walk back to `since` across several pages to fill gaps.
+  let publishedAfter: string | undefined
+  if (backfill) {
+    publishedAfter = since ? new Date(since).toISOString() : undefined
+  } else {
+    const { data: latest } = await db
+      .from('episodes')
+      .select('published_at')
+      .eq('podcast_id', podcastId)
+      .order('published_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    publishedAfter = latest?.published_at
+      ? new Date(new Date(latest.published_at).getTime() - 1000 * 60 * 60).toISOString()  // 1hr buffer
+      : undefined
+  }
 
-  let url = `https://www.googleapis.com/youtube/v3/search?part=id&channelId=${channelId}&type=video&order=date&maxResults=10&key=${YOUTUBE_API_KEY}`
-  if (publishedAfter) url += `&publishedAfter=${publishedAfter}`
+  const perPage = backfill ? 50 : 10
+  const pages   = backfill ? Math.max(1, maxPages) : 1
 
-  const resp = await fetch(url)
-  if (!resp.ok) return 0
-  const { items } = await resp.json()
-  if (!items?.length) return 0
+  // Collect video IDs across pages (search results are newest-first by date).
+  const videoIds: string[] = []
+  let pageToken: string | undefined
+  for (let p = 0; p < pages; p++) {
+    let url = `https://www.googleapis.com/youtube/v3/search?part=id&channelId=${channelId}&type=video&order=date&maxResults=${perPage}&key=${YOUTUBE_API_KEY}`
+    if (publishedAfter) url += `&publishedAfter=${publishedAfter}`
+    if (pageToken)      url += `&pageToken=${pageToken}`
 
-  const videoIds = items.map((i: any) => i.id.videoId).join(',')
-  return await fetchAndUpsertVideos(db, podcastId, videoIds)
+    const resp = await fetch(url)
+    if (!resp.ok) break
+    const data = await resp.json()
+    const items = data.items || []
+    for (const i of items) if (i.id?.videoId) videoIds.push(i.id.videoId)
+    pageToken = data.nextPageToken
+    if (!pageToken || !items.length) break
+  }
+  if (!videoIds.length) return 0
+
+  // The videos endpoint accepts at most 50 IDs per call — chunk it.
+  let total = 0
+  for (let i = 0; i < videoIds.length; i += 50) {
+    total += await fetchAndUpsertVideos(db, podcastId, videoIds.slice(i, i + 50).join(','))
+  }
+  return total
 }
 
 async function refreshYouTubePlaylist(db: any, podcastId: string, playlistId: string) {
