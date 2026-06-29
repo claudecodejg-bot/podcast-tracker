@@ -14,6 +14,10 @@ In the Supabase dashboard → SQL Editor, run these files **in order**:
 2. `sql/seed-categories.sql` — adds default categories (Financial, Fantasy Baseball, etc.)
 3. `sql/letterboxd-features.sql` — adds star ratings, listening diary, queue, curated lists, reviews, and favorite podcasts
 4. `sql/allow-member-name-reads.sql` — allows signed-in members to see each other's names (needed for activity feed, profiles, share notifications)
+5. `sql/user-categories.sql` — adds per-user podcast categories for the Library "Following" tab
+6. `sql/social-features.sql` — adds the notifications table, user follows (People page), and listen-confirmation columns on shares
+
+> **Important:** all six files must be run. Skipping `user-categories.sql` or `social-features.sql` leaves the app pointing at tables that don't exist (e.g. the notification bell will 404).
 
 ## 3. Configure the Frontend
 
