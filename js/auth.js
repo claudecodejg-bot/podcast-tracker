@@ -48,6 +48,8 @@ export async function requireAdmin() {
 /**
  * Returns the logged-in user's record from the users table, or null.
  * Does NOT redirect — use requireLogin() first if needed.
+ * Creates the users row on first sign-in (allowed by the users_insert_own
+ * RLS policy), so admin only needs to create the auth account.
  */
 export async function getCurrentUser() {
   const session = await getSession()
@@ -57,9 +59,44 @@ export async function getCurrentUser() {
     .from('users')
     .select('id, full_name, is_admin')
     .eq('auth_id', session.user.id)
-    .single()
+    .maybeSingle()
+  if (user) return user
 
-  return user || null
+  return await ensureUserRow(session)
+}
+
+/**
+ * Inserts the users-table row for the signed-in auth account if missing.
+ * Returns the row (existing or newly created), or null on failure.
+ */
+export async function ensureUserRow(session) {
+  const fallbackName = session.user.email?.split('@')[0] || 'Member'
+  const { data: inserted, error } = await supabase
+    .from('users')
+    .upsert(
+      {
+        auth_id: session.user.id,
+        email: session.user.email,
+        full_name: session.user.user_metadata?.full_name || fallbackName,
+      },
+      { onConflict: 'auth_id', ignoreDuplicates: true }
+    )
+    .select('id, full_name, is_admin')
+    .maybeSingle()
+
+  if (error) {
+    console.error('Could not create users row:', error.message)
+    return null
+  }
+  if (inserted) return inserted
+
+  // Row already existed (upsert ignored the duplicate) — fetch it
+  const { data: existing } = await supabase
+    .from('users')
+    .select('id, full_name, is_admin')
+    .eq('auth_id', session.user.id)
+    .maybeSingle()
+  return existing || null
 }
 
 /** Signs the user out and redirects to login.html. */

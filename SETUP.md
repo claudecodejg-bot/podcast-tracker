@@ -78,15 +78,13 @@ WHERE email = 'your@email.com';
 
 ## 7. Add Other Group Members
 
-In Supabase → Authentication → Users → Add User for each member.
+In Supabase → Authentication → Users → Add User for each member (any temporary password — they never see it).
 
-After they sign in the first time, their record is auto-created in the `users` table via RLS insert policy. Alternatively, run:
+Then tell them to go to the login page and click **"Forgot password?"** — the reset email lets them set their own password, and the app creates their `users` table record automatically on first sign-in (`ensureUserRow` in `js/auth.js`).
+
+To set someone's display name (defaults to the part of their email before the `@`):
 ```sql
-INSERT INTO users (auth_id, full_name, email)
-SELECT id, 'Member Name', email
-FROM auth.users
-WHERE email = 'member@email.com'
-ON CONFLICT (auth_id) DO NOTHING;
+UPDATE users SET full_name = 'Member Name' WHERE email = 'member@email.com';
 ```
 
 ## 8. Deploy to GitHub Pages
@@ -102,7 +100,13 @@ git push -u origin main
 
 Then in GitHub repo → Settings → Pages → Source: main branch / root.
 
-## 9. Set Up Daily Episode Refresh (Optional)
+## 9. Keep the Free-Tier Project Awake
+
+Supabase free-tier projects **pause after ~1 week without API traffic**, which takes the whole site down (DNS stops resolving) until you click **Restore** in the dashboard.
+
+`.github/workflows/keepalive.yml` pings the REST API daily to prevent this — it runs automatically once the repo is pushed to GitHub. If a friend ever reports the site is down, check https://supabase.com/dashboard and Restore the project.
+
+## 10. Set Up Daily Episode Refresh (Optional)
 
 In Supabase → Database → Extensions, enable `pg_cron`.
 

@@ -1,0 +1,32 @@
+# Pings the Supabase REST API daily so the free-tier project doesn't
+# auto-pause after ~1 week without traffic (a paused project takes the
+# whole site down until someone clicks Restore in the dashboard).
+#
+# The anon key is public by design (it ships in js/supabase-client.js);
+# row access is enforced by RLS.
+#
+# Note: GitHub disables scheduled workflows after ~60 days with no repo
+# activity — if you get the "workflows disabled" email, click re-enable.
+name: Supabase keep-alive
+
+on:
+  schedule:
+    - cron: '0 12 * * *'   # daily at 12:00 UTC
+  workflow_dispatch: {}     # allow manual runs from the Actions tab
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase REST API
+        run: |
+          ANON_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InltYnJob2NoYXVkanJicnJsd3l6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM5MjIwODAsImV4cCI6MjA4OTQ5ODA4MH0.fMhoiI3qEoUhR1K6CXZqv7wtaw6jvsufEEJDI2HX7A8'
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 \
+            -H "apikey: $ANON_KEY" \
+            -H "Authorization: Bearer $ANON_KEY" \
+            "https://ymbrhochaudjrbrrlwyz.supabase.co/rest/v1/categories?select=id&limit=1")
+          echo "Supabase responded with HTTP $STATUS"
+          if [ "$STATUS" != "200" ]; then
+            echo "::error::Supabase ping failed (HTTP $STATUS) — the project may be paused. Restore it at https://supabase.com/dashboard/project/ymbrhochaudjrbrrlwyz"
+            exit 1
+          fi

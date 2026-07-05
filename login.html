@@ -58,6 +58,19 @@
         </p>
       </form>
 
+      <!-- Shown when arriving from a password-reset / invite email link -->
+      <form id="new-password-form" class="hidden" style="margin-top:1rem;">
+        <div class="form-group">
+          <label for="new-password">New password</label>
+          <input type="password" id="new-password" placeholder="At least 6 characters" required minlength="6" autocomplete="new-password">
+        </div>
+        <div class="form-group">
+          <label for="confirm-password">Confirm password</label>
+          <input type="password" id="confirm-password" placeholder="••••••••" required autocomplete="new-password">
+        </div>
+        <button type="submit" class="btn btn-primary btn-full" id="new-password-btn">Set Password</button>
+      </form>
+
       <p style="margin-top:1rem;font-size:0.82rem;color:var(--gray-600);text-align:center;">
         Don't have an account? Contact your group admin.
       </p>
@@ -68,24 +81,93 @@
 <footer>Pod Tracker &copy; <span id="footer-year"></span></footer>
 
 <script type="module">
-  import { supabase } from './js/supabase-client.js'
-  import { getSession } from './js/auth.js'
+  // Capture the URL hash BEFORE creating the Supabase client — it consumes
+  // (and strips) recovery/invite tokens from the URL as it initializes.
+  const arrivalHash = new URLSearchParams(window.location.hash.slice(1))
+  let recoveryMode  = ['recovery', 'invite'].includes(arrivalHash.get('type'))
+
+  const { supabase }                 = await import('./js/supabase-client.js')
+  const { getSession, ensureUserRow } = await import('./js/auth.js')
 
   document.getElementById('footer-year').textContent = new Date().getFullYear()
 
-  getSession().then(session => {
-    if (session) window.location.href = 'library.html'
-  })
-
-  const alertEl   = document.getElementById('login-alert')
-  const loginForm = document.getElementById('login-form')
-  const resetForm = document.getElementById('reset-form')
+  const alertEl       = document.getElementById('login-alert')
+  const loginForm     = document.getElementById('login-form')
+  const resetForm     = document.getElementById('reset-form')
+  const newPassForm   = document.getElementById('new-password-form')
+  const subtitleEl    = document.getElementById('login-subtitle')
 
   function showAlert(msg, type = 'error') {
     alertEl.textContent = msg
     alertEl.className = `alert alert-${type}`
     alertEl.classList.remove('hidden')
   }
+
+  /** Human-friendly message for a sign-in failure. */
+  function signInErrorMessage(error) {
+    // No HTTP status → the request never reached Supabase (offline, DNS,
+    // or the free-tier project is paused and needs a dashboard Restore).
+    if (!error.status) {
+      return "Can't reach the server right now — it may be waking up. Try again in a minute, and tell your group admin if it keeps happening."
+    }
+    if (error.status === 400) return 'Incorrect email or password. Please try again.'
+    return `Sign-in failed (${error.status}). Please try again, or contact your group admin.`
+  }
+
+  function showNewPasswordForm() {
+    loginForm.classList.add('hidden')
+    resetForm.classList.add('hidden')
+    newPassForm.classList.remove('hidden')
+    subtitleEl.textContent = 'Choose a password for your account'
+  }
+
+  // Belt-and-braces: supabase-js fires this after it processes a recovery link.
+  supabase.auth.onAuthStateChange((event) => {
+    if (event === 'PASSWORD_RECOVERY') {
+      recoveryMode = true
+      showNewPasswordForm()
+    }
+  })
+
+  if (recoveryMode) {
+    // Arrived from a reset/invite email — let them set a password.
+    // Do NOT auto-redirect: the link created a session, but no password yet.
+    showNewPasswordForm()
+  } else if (arrivalHash.get('error_description')) {
+    // Expired or already-used email link
+    showAlert('That link has expired. Use "Forgot password?" below to get a new one.')
+  } else {
+    getSession().then(session => {
+      if (session) window.location.href = 'library.html'
+    })
+  }
+
+  newPassForm.addEventListener('submit', async (e) => {
+    e.preventDefault()
+    const password = document.getElementById('new-password').value
+    const confirm  = document.getElementById('confirm-password').value
+    if (password !== confirm) {
+      showAlert("Those passwords don't match.")
+      return
+    }
+
+    const btn = document.getElementById('new-password-btn')
+    btn.disabled = true
+    btn.textContent = 'Saving…'
+
+    const { data, error } = await supabase.auth.updateUser({ password })
+    if (error) {
+      showAlert(error.message || 'Could not set password. The link may have expired — use "Forgot password?" to get a new one.')
+      btn.disabled = false
+      btn.textContent = 'Set Password'
+      return
+    }
+
+    const session = await getSession()
+    if (session) await ensureUserRow(session)
+    showAlert('Password set! Taking you to your library…', 'success')
+    window.location.href = 'library.html'
+  })
 
   document.getElementById('forgot-btn').addEventListener('click', () => {
     loginForm.classList.add('hidden')
@@ -111,15 +193,16 @@
     const email    = document.getElementById('email').value.trim()
     const password = document.getElementById('password').value
 
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
 
     if (error) {
-      showAlert('Incorrect email or password. Please try again.')
+      showAlert(signInErrorMessage(error))
       btn.disabled = false
       btn.textContent = 'Sign In'
       return
     }
 
+    if (data.session) await ensureUserRow(data.session)
     window.location.href = 'library.html'
   })
 
