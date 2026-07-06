@@ -31,8 +31,32 @@
 <main>
   <div class="container" style="max-width:900px;padding-top:2rem">
     <h1 style="font-size:1.5rem;font-weight:800;margin-bottom:1.5rem">👥 People</h1>
-    <div id="people-grid" class="people-grid">
-      <div class="loading-state" style="grid-column:1/-1"><div class="spinner"></div> Loading…</div>
+
+    <!-- Incoming follow requests -->
+    <div id="requests-section" class="hidden" style="margin-bottom:1.5rem">
+      <div class="section-header">
+        <span class="section-title">🤝 Follow Requests</span>
+      </div>
+      <div id="requests-list" style="display:flex;flex-direction:column;gap:.5rem;margin-top:.6rem"></div>
+    </div>
+
+    <!-- Search -->
+    <div class="form-group" style="margin-bottom:1.5rem">
+      <input type="search" id="people-search" placeholder="Search people by name…" autocomplete="off"
+             style="width:100%;max-width:420px">
+      <p class="text-muted" style="font-size:.82rem;margin-top:.35rem">
+        Find group members by name, then follow them to see their activity.
+      </p>
+    </div>
+
+    <div id="people-grid" class="people-grid"></div>
+
+    <!-- People you follow (default view when not searching) -->
+    <div id="following-section" style="margin-top:1.5rem">
+      <div class="section-header">
+        <span class="section-title">✓ People You Follow</span>
+      </div>
+      <div id="following-grid" class="people-grid" style="margin-top:.6rem"></div>
     </div>
   </div>
 </main>
@@ -43,6 +67,7 @@
   import { supabase } from './js/supabase-client.js'
   import { initNav, getCurrentUser } from './js/auth.js'
   import { initNotificationDropdown } from './js/notifications.js'
+  import { follow, unfollow, getPendingRequests, acceptRequest, declineRequest, followBtnLabel } from './js/follows.js'
 
   document.getElementById('footer-year').textContent = new Date().getFullYear()
   document.getElementById('nav-hamburger').addEventListener('click', () => {
@@ -50,90 +75,168 @@
   })
 
   let me = null
+  // follow state per target user id: 'none' | 'pending' | 'accepted'
+  const followState = {}
 
   async function init() {
     await initNav('people')
     await initNotificationDropdown()
     me = await getCurrentUser()
-    await loadPeople()
-  }
 
-  async function loadPeople() {
-    const grid = document.getElementById('people-grid')
-
-    // Fetch all users
-    const { data: users } = await supabase
-      .from('users')
-      .select('id, full_name')
-      .order('full_name')
-
-    if (!users?.length) {
-      grid.innerHTML = '<div class="empty-state" style="grid-column:1/-1"><h3>No users yet</h3></div>'
+    if (!me) {
+      document.getElementById('people-grid').innerHTML =
+        '<div class="empty-state" style="grid-column:1/-1"><h3>Sign in to find people</h3><p><a href="login.html">Sign in</a> to search for group members and follow them.</p></div>'
+      document.getElementById('following-section').classList.add('hidden')
       return
     }
 
-    // Fetch stats in parallel
-    const userIds = users.map(u => u.id)
+    await Promise.all([loadMyFollows(), loadRequests()])
+    renderFollowing()
+    wireSearch()
+  }
 
-    const [{ data: logCounts }, { data: ratingCounts }, { data: myFollows }] = await Promise.all([
-      supabase.from('listening_log').select('user_id').in('user_id', userIds),
-      supabase.from('episode_ratings').select('user_id').in('user_id', userIds),
-      me ? supabase.from('user_follows').select('following_id').eq('follower_id', me.id) : { data: [] }
-    ])
+  // ----- My outgoing follows (both states) -----
+  let myFollows = []   // rows: { following_id, status, users: {id, full_name} }
 
-    // Count per user
-    const logMap = {}
-    logCounts?.forEach(r => { logMap[r.user_id] = (logMap[r.user_id] || 0) + 1 })
-    const ratMap = {}
-    ratingCounts?.forEach(r => { ratMap[r.user_id] = (ratMap[r.user_id] || 0) + 1 })
-    const followSet = new Set((myFollows || []).map(f => f.following_id))
+  async function loadMyFollows() {
+    const { data } = await supabase
+      .from('user_follows')
+      .select('following_id, status, users!user_follows_following_id_fkey(id, full_name)')
+      .eq('follower_id', me.id)
+    myFollows = data || []
+    myFollows.forEach(f => { followState[f.following_id] = f.status })
+  }
 
-    grid.innerHTML = users.map(u => {
-      const initials = u.full_name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
-      const isSelf = me && me.id === u.id
-      const isFollowing = followSet.has(u.id)
+  // ----- Incoming follow requests -----
+  async function loadRequests() {
+    const requests = await getPendingRequests(me.id)
+    const section = document.getElementById('requests-section')
+    const list    = document.getElementById('requests-list')
+
+    if (!requests.length) {
+      section.classList.add('hidden')
+      return
+    }
+
+    section.classList.remove('hidden')
+    list.innerHTML = requests.map(r => {
+      const name = r.users?.full_name || 'Someone'
+      const initials = name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
       return `
-        <div class="person-card" data-user-id="${u.id}">
-          <a href="profile.html?user=${u.id}" style="text-decoration:none;color:inherit;display:flex;flex-direction:column;align-items:center;gap:.5rem">
-            <div class="person-avatar">${initials}</div>
-            <div class="person-name">${escHtml(u.full_name)}</div>
-          </a>
-          <div class="person-stats">
-            <span>🎧 ${logMap[u.id] || 0}</span>
-            <span>⭐ ${ratMap[u.id] || 0}</span>
-          </div>
-          ${!isSelf && me ? `
-            <button class="follow-btn ${isFollowing ? 'following' : ''}" data-uid="${u.id}">
-              ${isFollowing ? 'Following' : 'Follow'}
-            </button>` : ''}
+        <div class="card" data-request-id="${r.id}" style="display:flex;align-items:center;gap:.75rem;padding:.7rem .9rem">
+          <a href="profile.html?user=${r.users?.id}" class="follower-avatar-sm" style="text-decoration:none">${initials}</a>
+          <a href="profile.html?user=${r.users?.id}" style="flex:1;font-weight:600;color:var(--text);text-decoration:none">${escHtml(name)}</a>
+          <button class="btn btn-sm btn-primary" data-accept>Accept</button>
+          <button class="btn btn-sm btn-secondary" data-decline>Decline</button>
         </div>`
     }).join('')
 
-    // Wire follow buttons
-    grid.querySelectorAll('.follow-btn').forEach(btn => {
+    list.querySelectorAll('[data-request-id]').forEach(row => {
+      const req = requests.find(r => r.id === row.dataset.requestId)
+      row.querySelector('[data-accept]').addEventListener('click', async (e) => {
+        e.target.disabled = true
+        await acceptRequest(me, req)
+        row.remove()
+        if (!list.children.length) document.getElementById('requests-section').classList.add('hidden')
+      })
+      row.querySelector('[data-decline]').addEventListener('click', async (e) => {
+        e.target.disabled = true
+        await declineRequest(req.id)
+        row.remove()
+        if (!list.children.length) document.getElementById('requests-section').classList.add('hidden')
+      })
+    })
+  }
+
+  // ----- Search -----
+  function wireSearch() {
+    const input = document.getElementById('people-search')
+    let timer = null
+    input.addEventListener('input', () => {
+      clearTimeout(timer)
+      timer = setTimeout(() => runSearch(input.value.trim()), 300)
+    })
+  }
+
+  async function runSearch(term) {
+    const grid = document.getElementById('people-grid')
+    const followingSection = document.getElementById('following-section')
+
+    if (term.length < 2) {
+      grid.innerHTML = ''
+      followingSection.classList.remove('hidden')
+      return
+    }
+
+    followingSection.classList.add('hidden')
+    grid.innerHTML = '<div class="loading-state" style="grid-column:1/-1"><div class="spinner"></div></div>'
+
+    const { data: users } = await supabase
+      .from('users')
+      .select('id, full_name, follow_policy')
+      .ilike('full_name', `%${term}%`)
+      .neq('id', me.id)
+      .order('full_name')
+      .limit(20)
+
+    if (!users?.length) {
+      grid.innerHTML = '<div class="empty-state" style="grid-column:1/-1"><h3>No one found</h3><p>Try a different name.</p></div>'
+      return
+    }
+
+    grid.innerHTML = users.map(u => personCardHTML(u)).join('')
+    wireFollowButtons(grid, users)
+  }
+
+  // ----- People you follow -----
+  function renderFollowing() {
+    const grid = document.getElementById('following-grid')
+    const accepted = myFollows.filter(f => f.status === 'accepted' && f.users)
+
+    if (!accepted.length) {
+      grid.innerHTML = '<div class="empty-state" style="grid-column:1/-1"><p class="text-muted">You aren\'t following anyone yet — search above to find people.</p></div>'
+      return
+    }
+
+    // follow_policy isn't needed to render (they're already accepted)
+    const users = accepted.map(f => ({ id: f.users.id, full_name: f.users.full_name, follow_policy: 'open' }))
+    grid.innerHTML = users.map(u => personCardHTML(u)).join('')
+    wireFollowButtons(grid, users)
+  }
+
+  function personCardHTML(u) {
+    const initials = u.full_name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
+    const state = followState[u.id] || 'none'
+    return `
+      <div class="person-card" data-user-id="${u.id}">
+        <a href="profile.html?user=${u.id}" style="text-decoration:none;color:inherit;display:flex;flex-direction:column;align-items:center;gap:.5rem">
+          <div class="person-avatar">${initials}</div>
+          <div class="person-name">${escHtml(u.full_name)}</div>
+        </a>
+        <button class="follow-btn ${state !== 'none' ? 'following' : ''}" data-uid="${u.id}">
+          ${followBtnLabel(state)}
+        </button>
+      </div>`
+  }
+
+  function wireFollowButtons(root, users) {
+    root.querySelectorAll('.follow-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
         const uid = btn.dataset.uid
+        const target = users.find(u => u.id === uid)
         btn.disabled = true
-
-        if (btn.classList.contains('following')) {
-          await supabase.from('user_follows').delete()
-            .eq('follower_id', me.id).eq('following_id', uid)
-          btn.classList.remove('following')
-          btn.textContent = 'Follow'
-        } else {
-          await supabase.from('user_follows').insert({ follower_id: me.id, following_id: uid })
-          btn.classList.add('following')
-          btn.textContent = 'Following'
-          // Create notification
-          await supabase.from('notifications').insert({
-            user_id: uid,
-            type: 'new_follower',
-            title: `${me.full_name} started following you`,
-            link: `profile.html?user=${me.id}`,
-            related_user_id: me.id
-          })
+        try {
+          if ((followState[uid] || 'none') === 'none') {
+            followState[uid] = await follow(me, target)
+          } else {
+            await unfollow(me.id, uid)   // unfollow or cancel request
+            followState[uid] = 'none'
+          }
+        } catch (err) {
+          console.error('Follow action failed:', err.message)
         }
-
+        btn.textContent = followBtnLabel(followState[uid])
+        btn.classList.toggle('following', followState[uid] !== 'none')
         btn.disabled = false
       })
     })

@@ -16,8 +16,9 @@ In the Supabase dashboard → SQL Editor, run these files **in order**:
 4. `sql/allow-member-name-reads.sql` — allows signed-in members to see each other's names (needed for activity feed, profiles, share notifications)
 5. `sql/user-categories.sql` — adds per-user podcast categories for the Library "Following" tab
 6. `sql/social-features.sql` — adds the notifications table, user follows (People page), and listen-confirmation columns on shares
+7. `sql/follow-requests.sql` — adds per-user follow policy (anyone / approve requests), pending follow requests, and fixes the notifications RLS so cross-user notifications (shares, follows) actually deliver
 
-> **Important:** all six files must be run. Skipping `user-categories.sql` or `social-features.sql` leaves the app pointing at tables that don't exist (e.g. the notification bell will 404).
+> **Important:** all seven files must be run. Skipping `user-categories.sql` or `social-features.sql` leaves the app pointing at tables that don't exist (e.g. the notification bell will 404).
 
 ## 3. Configure the Frontend
 

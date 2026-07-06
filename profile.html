@@ -48,8 +48,15 @@
         <div id="follow-btn-wrap" class="hidden" style="margin-top:.75rem">
           <button class="follow-btn" id="follow-btn">Follow</button>
         </div>
-        <div id="own-profile-actions" class="hidden" style="margin-top:.75rem">
+        <div id="own-profile-actions" class="hidden" style="margin-top:.75rem;display:flex;align-items:center;gap:.75rem;flex-wrap:wrap">
           <a href="library.html" class="btn btn-sm btn-outline">My Library</a>
+          <label style="display:flex;align-items:center;gap:.4rem;font-size:.82rem;color:var(--gray-600)">
+            Followers:
+            <select id="follow-policy-select" style="font-size:.82rem;padding:.25rem .4rem;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text)">
+              <option value="open">Anyone can follow me</option>
+              <option value="approval">Approve requests</option>
+            </select>
+          </label>
         </div>
       </div>
     </div>
@@ -178,6 +185,7 @@
   import { renderStars, renderHistogram, formatRating } from './js/ratings.js'
   import { platformBadge, formatDate } from './js/search.js'
   import { initNotificationDropdown } from './js/notifications.js'
+  import { follow, unfollow, followBtnLabel } from './js/follows.js'
 
   document.getElementById('footer-year').textContent = new Date().getFullYear()
   document.getElementById('nav-hamburger').addEventListener('click', () => {
@@ -203,6 +211,7 @@
   let   userId  = params.get('user')   // UUID from users table
   let   me      = null
   let   isOwn   = false
+  let   profileUser = null             // the users row being viewed (has follow_policy)
 
   async function init() {
     await initNav(null)
@@ -224,7 +233,7 @@
     // Fetch user record
     const { data: user } = await supabase
       .from('users')
-      .select('id, full_name, email, created_at')
+      .select('id, full_name, email, created_at, follow_policy')
       .eq('id', userId)
       .maybeSingle()
 
@@ -232,6 +241,7 @@
       document.getElementById('profile-loading').innerHTML = `<div class="empty-state"><h3>User not found</h3></div>`
       return
     }
+    profileUser = user
 
     document.getElementById('profile-loading').classList.add('hidden')
     document.getElementById('profile-wrap').classList.remove('hidden')
@@ -246,6 +256,20 @@
 
     if (isOwn) {
       document.getElementById('own-profile-actions').classList.remove('hidden')
+      const policySelect = document.getElementById('follow-policy-select')
+      policySelect.value = user.follow_policy || 'open'
+      policySelect.addEventListener('change', async () => {
+        const { error } = await supabase
+          .from('users')
+          .update({ follow_policy: policySelect.value })
+          .eq('id', me.id)
+        if (error) {
+          console.error('Could not save follow policy:', error.message)
+          policySelect.value = user.follow_policy || 'open'
+        } else {
+          user.follow_policy = policySelect.value
+        }
+      })
     }
 
     await Promise.all([
@@ -294,12 +318,13 @@
   }
 
   // ---- Follow System ----
-  let isFollowing = false
+  // 'none' | 'pending' | 'accepted'
+  let followState = 'none'
 
   async function loadFollowData() {
     const [{ count: followersCount }, { count: followingCount }] = await Promise.all([
-      supabase.from('user_follows').select('id', { count: 'exact', head: true }).eq('following_id', userId),
-      supabase.from('user_follows').select('id', { count: 'exact', head: true }).eq('follower_id', userId)
+      supabase.from('user_follows').select('id', { count: 'exact', head: true }).eq('following_id', userId).eq('status', 'accepted'),
+      supabase.from('user_follows').select('id', { count: 'exact', head: true }).eq('follower_id', userId).eq('status', 'accepted')
     ])
 
     document.getElementById('followers-count').textContent = followersCount || 0
@@ -315,12 +340,12 @@
     if (me && !isOwn) {
       const { data: existing } = await supabase
         .from('user_follows')
-        .select('id')
+        .select('status')
         .eq('follower_id', me.id)
         .eq('following_id', userId)
         .maybeSingle()
 
-      isFollowing = !!existing
+      followState = existing?.status || 'none'
       updateFollowBtn()
       document.getElementById('follow-btn-wrap').classList.remove('hidden')
       document.getElementById('follow-btn').addEventListener('click', toggleFollow)
@@ -329,34 +354,32 @@
 
   function updateFollowBtn() {
     const btn = document.getElementById('follow-btn')
-    btn.textContent = isFollowing ? 'Following' : 'Follow'
-    btn.classList.toggle('following', isFollowing)
+    btn.textContent = followBtnLabel(followState)
+    btn.classList.toggle('following', followState !== 'none')
   }
 
   async function toggleFollow() {
     if (!me) { location.href = 'login.html'; return }
     const btn = document.getElementById('follow-btn')
     btn.disabled = true
+    const followersEl = document.getElementById('followers-count')
 
-    if (isFollowing) {
-      await supabase.from('user_follows').delete()
-        .eq('follower_id', me.id).eq('following_id', userId)
-      isFollowing = false
-      const el = document.getElementById('followers-count')
-      el.textContent = Math.max(0, Number(el.textContent) - 1)
-    } else {
-      await supabase.from('user_follows').insert({ follower_id: me.id, following_id: userId })
-      isFollowing = true
-      const el = document.getElementById('followers-count')
-      el.textContent = Number(el.textContent) + 1
-      // Create notification for followed user
-      await supabase.from('notifications').insert({
-        user_id: userId,
-        type: 'new_follower',
-        title: `${me.full_name} started following you`,
-        link: `profile.html?user=${me.id}`,
-        related_user_id: me.id
-      })
+    try {
+      if (followState === 'none') {
+        followState = await follow(me, profileUser)
+        if (followState === 'accepted') {
+          followersEl.textContent = Number(followersEl.textContent) + 1
+        }
+      } else {
+        const wasAccepted = followState === 'accepted'
+        await unfollow(me.id, userId)   // unfollow or cancel pending request
+        followState = 'none'
+        if (wasAccepted) {
+          followersEl.textContent = Math.max(0, Number(followersEl.textContent) - 1)
+        }
+      }
+    } catch (err) {
+      console.error('Follow action failed:', err.message)
     }
 
     btn.disabled = false
@@ -377,12 +400,14 @@
         .from('user_follows')
         .select('follower_id, users!user_follows_follower_id_fkey(id, full_name)')
         .eq('following_id', userId)
+        .eq('status', 'accepted')
       users = data?.map(d => d.users).filter(Boolean) || []
     } else {
       const { data } = await supabase
         .from('user_follows')
         .select('following_id, users!user_follows_following_id_fkey(id, full_name)')
         .eq('follower_id', userId)
+        .eq('status', 'accepted')
       users = data?.map(d => d.users).filter(Boolean) || []
     }
 

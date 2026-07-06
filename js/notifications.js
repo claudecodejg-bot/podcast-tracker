@@ -88,6 +88,8 @@ export function notifIcon(type) {
     case 'new_share':      return '📤'
     case 'new_follower':   return '👤'
     case 'follow_activity': return '🎙️'
+    case 'follow_request':  return '🤝'
+    case 'follow_accepted': return '✅'
     default:               return '🔔'
   }
 }
