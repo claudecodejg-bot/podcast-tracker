@@ -58,6 +58,14 @@
       </div>
       <div id="following-grid" class="people-grid" style="margin-top:.6rem"></div>
     </div>
+
+    <!-- Your followers (default view when not searching) -->
+    <div id="followers-section" style="margin-top:1.5rem">
+      <div class="section-header">
+        <span class="section-title">👤 Your Followers</span>
+      </div>
+      <div id="followers-grid" class="people-grid" style="margin-top:.6rem"></div>
+    </div>
   </div>
 </main>
 
@@ -87,24 +95,38 @@
       document.getElementById('people-grid').innerHTML =
         '<div class="empty-state" style="grid-column:1/-1"><h3>Sign in to find people</h3><p><a href="login.html">Sign in</a> to search for group members and follow them.</p></div>'
       document.getElementById('following-section').classList.add('hidden')
+      document.getElementById('followers-section').classList.add('hidden')
       return
     }
 
-    await Promise.all([loadMyFollows(), loadRequests()])
+    await Promise.all([loadMyFollows(), loadMyFollowers(), loadRequests()])
     renderFollowing()
+    renderFollowers()
     wireSearch()
   }
 
   // ----- My outgoing follows (both states) -----
-  let myFollows = []   // rows: { following_id, status, users: {id, full_name} }
+  let myFollows = []   // rows: { following_id, status, users: {id, full_name, follow_policy} }
 
   async function loadMyFollows() {
     const { data } = await supabase
       .from('user_follows')
-      .select('following_id, status, users!user_follows_following_id_fkey(id, full_name)')
+      .select('following_id, status, users!user_follows_following_id_fkey(id, full_name, follow_policy)')
       .eq('follower_id', me.id)
     myFollows = data || []
     myFollows.forEach(f => { followState[f.following_id] = f.status })
+  }
+
+  // ----- My accepted followers -----
+  let myFollowers = []   // rows: { follower_id, users: {id, full_name, follow_policy} }
+
+  async function loadMyFollowers() {
+    const { data } = await supabase
+      .from('user_follows')
+      .select('follower_id, users!user_follows_follower_id_fkey(id, full_name, follow_policy)')
+      .eq('following_id', me.id)
+      .eq('status', 'accepted')
+    myFollowers = data || []
   }
 
   // ----- Incoming follow requests -----
@@ -138,6 +160,10 @@
         await acceptRequest(me, req)
         row.remove()
         if (!list.children.length) document.getElementById('requests-section').classList.add('hidden')
+        if (req.users) {
+          myFollowers.push({ follower_id: req.follower_id, users: req.users })
+          renderFollowers()
+        }
       })
       row.querySelector('[data-decline]').addEventListener('click', async (e) => {
         e.target.disabled = true
@@ -161,14 +187,19 @@
   async function runSearch(term) {
     const grid = document.getElementById('people-grid')
     const followingSection = document.getElementById('following-section')
+    const followersSection = document.getElementById('followers-section')
 
     if (term.length < 2) {
       grid.innerHTML = ''
       followingSection.classList.remove('hidden')
+      followersSection.classList.remove('hidden')
+      renderFollowing()   // re-render: follow states may have changed while searching
+      renderFollowers()
       return
     }
 
     followingSection.classList.add('hidden')
+    followersSection.classList.add('hidden')
     grid.innerHTML = '<div class="loading-state" style="grid-column:1/-1"><div class="spinner"></div></div>'
 
     const { data: users } = await supabase
@@ -191,15 +222,30 @@
   // ----- People you follow -----
   function renderFollowing() {
     const grid = document.getElementById('following-grid')
-    const accepted = myFollows.filter(f => f.status === 'accepted' && f.users)
+    const users = myFollows
+      .filter(f => f.status === 'accepted' && f.users)
+      .map(f => f.users)
 
-    if (!accepted.length) {
+    if (!users.length) {
       grid.innerHTML = '<div class="empty-state" style="grid-column:1/-1"><p class="text-muted">You aren\'t following anyone yet — search above to find people.</p></div>'
       return
     }
 
-    // follow_policy isn't needed to render (they're already accepted)
-    const users = accepted.map(f => ({ id: f.users.id, full_name: f.users.full_name, follow_policy: 'open' }))
+    grid.innerHTML = users.map(u => personCardHTML(u)).join('')
+    wireFollowButtons(grid, users)
+  }
+
+  // ----- Your followers -----
+  function renderFollowers() {
+    const grid = document.getElementById('followers-grid')
+    const users = myFollowers.filter(f => f.users).map(f => f.users)
+
+    if (!users.length) {
+      grid.innerHTML = '<div class="empty-state" style="grid-column:1/-1"><p class="text-muted">No followers yet.</p></div>'
+      return
+    }
+
+    // The button on each card reflects YOUR follow state toward them (follow back)
     grid.innerHTML = users.map(u => personCardHTML(u)).join('')
     wireFollowButtons(grid, users)
   }
@@ -231,6 +277,14 @@
           } else {
             await unfollow(me.id, uid)   // unfollow or cancel request
             followState[uid] = 'none'
+          }
+          // Keep the cached following list in sync for section re-renders
+          if (followState[uid] === 'none') {
+            myFollows = myFollows.filter(f => f.following_id !== uid)
+          } else {
+            const row = myFollows.find(f => f.following_id === uid)
+            if (row) row.status = followState[uid]
+            else myFollows.push({ following_id: uid, status: followState[uid], users: target })
           }
         } catch (err) {
           console.error('Follow action failed:', err.message)

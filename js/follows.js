@@ -56,7 +56,7 @@ export async function unfollow(meId, targetId) {
 export async function getPendingRequests(meId) {
   const { data } = await supabase
     .from('user_follows')
-    .select('id, follower_id, created_at, users!user_follows_follower_id_fkey(id, full_name)')
+    .select('id, follower_id, created_at, users!user_follows_follower_id_fkey(id, full_name, follow_policy)')
     .eq('following_id', meId)
     .eq('status', 'pending')
     .order('created_at', { ascending: false })
