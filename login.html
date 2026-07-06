@@ -218,7 +218,7 @@
     })
 
     if (error) {
-      showAlert('Could not send reset email. Please try again.')
+      showAlert(`Could not send reset email: ${error.message || 'unknown error'}. If this keeps happening, contact your group admin.`)
     } else {
       showAlert('Reset email sent! Check your inbox.', 'success')
     }
