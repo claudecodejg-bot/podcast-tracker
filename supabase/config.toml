@@ -32,7 +32,10 @@ refresh_token_reuse_interval = 10
 enable_signup = false   # invite-only: create users via dashboard
 
 [auth.email]
-enable_signup = false
+# NOTE: this flag maps to the remote "Email provider" toggle — setting it
+# false disables ALL email/password auth (sign-in + recovery), not just
+# signups. Public signup is already blocked by auth.enable_signup above.
+enable_signup = true
 double_confirm_changes = true
 enable_confirmations = false
 
