@@ -6,6 +6,14 @@
   <title>Pod Tracker — Your Group Podcast Hub</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <link rel="stylesheet" href="css/style.css">
+  <script>
+    // Invite/recovery email links redirect to the Site URL (this page).
+    // Bounce to login.html BEFORE any module loads, or the Supabase client
+    // consumes the one-time token and the user never gets a password form.
+    if (/[#&](type=(invite|recovery)|error_description=)/.test(location.hash)) {
+      location.replace('login.html' + location.hash)
+    }
+  </script>
 </head>
 <body>
 
