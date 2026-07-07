@@ -11,6 +11,8 @@ import { createClient } from 'npm:@supabase/supabase-js@2'
 const SUPABASE_URL         = Deno.env.get('SUPABASE_URL') || ''
 const SUPABASE_SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
 const YOUTUBE_API_KEY      = Deno.env.get('YOUTUBE_API_KEY') || ''
+const SPOTIFY_CLIENT_ID     = Deno.env.get('SPOTIFY_CLIENT_ID') || ''
+const SPOTIFY_CLIENT_SECRET = Deno.env.get('SPOTIFY_CLIENT_SECRET') || ''
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, content-type',
@@ -64,11 +66,65 @@ async function refreshPodcast(db: any, podcast: any, opts: any = {}) {
     }
     await updateLikesVsAvg(db, podcastId)
     await takeSnapshot(db, podcastId)
+  } else if (platform === 'spotify' && platform_id && SPOTIFY_CLIENT_ID && SPOTIFY_CLIENT_SECRET) {
+    newEpisodes += await refreshSpotifyShow(db, podcastId, platform_id)
   } else if (feed_url) {
     newEpisodes += await refreshRssFeed(db, podcastId, feed_url)
   }
 
   return { new_episodes: newEpisodes }
+}
+
+async function refreshSpotifyShow(db: any, podcastId: string, showId: string): Promise<number> {
+  const token = await getSpotifyToken()
+  if (!token) return 0
+
+  const resp = await fetch(
+    `https://api.spotify.com/v1/shows/${showId}/episodes?market=US&limit=20`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  )
+  if (!resp.ok) return 0
+  const { items } = await resp.json()
+  if (!items?.length) return 0
+
+  const { data: existing } = await db
+    .from('episodes')
+    .select('platform_episode_id')
+    .eq('podcast_id', podcastId)
+  const existingIds = new Set((existing || []).map((e: any) => e.platform_episode_id))
+
+  const rows = items
+    .filter((e: any) => e?.id && !existingIds.has(e.id))
+    .map((e: any) => ({
+      podcast_id:          podcastId,
+      title:               e.name,
+      description:         (e.description || '').slice(0, 2000),
+      platform_episode_id: e.id,
+      published_at:        e.release_date ? new Date(e.release_date).toISOString() : null,
+      duration_seconds:    e.duration_ms ? Math.round(e.duration_ms / 1000) : null,
+      episode_url:         e.external_urls?.spotify || `https://open.spotify.com/episode/${e.id}`,
+    }))
+  if (!rows.length) return 0
+
+  await db.from('episodes').upsert(rows, { onConflict: 'podcast_id,platform_episode_id' })
+  return rows.length
+}
+
+async function getSpotifyToken(): Promise<string> {
+  try {
+    const resp = await fetch('https://accounts.spotify.com/api/token', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Basic ' + btoa(`${SPOTIFY_CLIENT_ID}:${SPOTIFY_CLIENT_SECRET}`),
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: 'grant_type=client_credentials',
+    })
+    if (!resp.ok) return ''
+    return (await resp.json()).access_token || ''
+  } catch {
+    return ''
+  }
 }
 
 async function refreshYouTubeChannel(db: any, podcastId: string, channelId: string, opts: any = {}) {

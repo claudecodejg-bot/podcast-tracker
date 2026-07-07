@@ -17,8 +17,9 @@ In the Supabase dashboard → SQL Editor, run these files **in order**:
 5. `sql/user-categories.sql` — adds per-user podcast categories for the Library "Following" tab
 6. `sql/social-features.sql` — adds the notifications table, user follows (People page), and listen-confirmation columns on shares
 7. `sql/follow-requests.sql` — adds per-user follow policy (anyone / approve requests), pending follow requests, and fixes the notifications RLS so cross-user notifications (shares, follows) actually deliver
+8. `sql/preferred-platform.sql` — adds each member's preferred source (YouTube/Apple/Spotify) for the "Also available on" cross-platform switcher
 
-> **Important:** all seven files must be run. Skipping `user-categories.sql` or `social-features.sql` leaves the app pointing at tables that don't exist (e.g. the notification bell will 404).
+> **Important:** all eight files must be run. Skipping `user-categories.sql` or `social-features.sql` leaves the app pointing at tables that don't exist (e.g. the notification bell will 404).
 
 ## 3. Configure the Frontend
 
@@ -34,6 +35,7 @@ const SUPABASE_ANON = 'YOUR_SUPABASE_ANON_KEY'
 |-----|-----------------|
 | **YouTube Data API v3** | [console.cloud.google.com](https://console.cloud.google.com) → APIs & Services → Enable YouTube Data API v3 → Create credentials → API Key |
 | **Anthropic API Key** | [console.anthropic.com](https://console.anthropic.com) → API Keys |
+| **Spotify Client ID + Secret** | [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard) → Create app (any redirect URI, check Web API) → Settings → Client ID / Client secret. Enables Spotify as a search source and Spotify episode fetch/playback. |
 
 ## 5. Deploy Edge Functions
 
@@ -53,6 +55,8 @@ Set secret environment variables:
 supabase secrets set YOUTUBE_API_KEY=your_key_here
 supabase secrets set ANTHROPIC_API_KEY=your_key_here
 supabase secrets set SUPABASE_SERVICE_ROLE_KEY=your_service_role_key_here
+supabase secrets set SPOTIFY_CLIENT_ID=your_spotify_client_id
+supabase secrets set SPOTIFY_CLIENT_SECRET=your_spotify_client_secret
 ```
 
 Deploy all edge functions:
