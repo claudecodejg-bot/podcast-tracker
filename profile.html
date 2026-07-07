@@ -268,7 +268,7 @@
 
       // Theme picker — stored per device in localStorage (see js/theme.js)
       const themeSelect = document.getElementById('theme-select')
-      themeSelect.value = localStorage.getItem('pt-theme') || 'dark'
+      themeSelect.value = localStorage.getItem('pt-theme') || 'medium'
       themeSelect.addEventListener('change', () => {
         const t = themeSelect.value
         localStorage.setItem('pt-theme', t)
