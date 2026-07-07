@@ -6,6 +6,7 @@
   <title>Profile — Pod Tracker</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <link rel="stylesheet" href="css/style.css">
+  <script src="js/theme.js"></script>
 </head>
 <body>
 
@@ -55,6 +56,14 @@
             <select id="follow-policy-select" style="font-size:.82rem;padding:.25rem .4rem;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text)">
               <option value="open">Anyone can follow me</option>
               <option value="approval">Approve requests</option>
+            </select>
+          </label>
+          <label style="display:flex;align-items:center;gap:.4rem;font-size:.82rem;color:var(--gray-600)">
+            Theme:
+            <select id="theme-select" style="font-size:.82rem;padding:.25rem .4rem;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text)">
+              <option value="dark">Dark</option>
+              <option value="medium">Medium</option>
+              <option value="light">Light</option>
             </select>
           </label>
         </div>
@@ -256,6 +265,17 @@
 
     if (isOwn) {
       document.getElementById('own-profile-actions').classList.remove('hidden')
+
+      // Theme picker — stored per device in localStorage (see js/theme.js)
+      const themeSelect = document.getElementById('theme-select')
+      themeSelect.value = localStorage.getItem('pt-theme') || 'dark'
+      themeSelect.addEventListener('change', () => {
+        const t = themeSelect.value
+        localStorage.setItem('pt-theme', t)
+        if (t === 'dark') document.documentElement.removeAttribute('data-theme')
+        else document.documentElement.setAttribute('data-theme', t)
+      })
+
       const policySelect = document.getElementById('follow-policy-select')
       policySelect.value = user.follow_policy || 'open'
       policySelect.addEventListener('change', async () => {
