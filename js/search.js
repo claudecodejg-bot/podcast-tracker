@@ -138,8 +138,16 @@ export function groupPodcastResults(list) {
   }
   return order.map(k => {
     const sources = map.get(k)
-    sources.sort((a, b) => rank(a.platform) - rank(b.platform))
-    return sources
+    // Keep only the first (best-ranked by search relevance) source per platform,
+    // so the picker shows one chip per platform, not duplicates.
+    const seenPlatform = new Set()
+    const deduped = sources.filter(s => {
+      if (seenPlatform.has(s.platform)) return false
+      seenPlatform.add(s.platform)
+      return true
+    })
+    deduped.sort((a, b) => rank(a.platform) - rank(b.platform))
+    return deduped
   })
 }
 

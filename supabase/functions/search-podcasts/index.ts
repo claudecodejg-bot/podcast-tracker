@@ -7,6 +7,8 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 
 const YOUTUBE_API_KEY = Deno.env.get('YOUTUBE_API_KEY') || ''
+const SPOTIFY_CLIENT_ID     = Deno.env.get('SPOTIFY_CLIENT_ID') || ''
+const SPOTIFY_CLIENT_SECRET = Deno.env.get('SPOTIFY_CLIENT_SECRET') || ''
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, content-type',
@@ -23,7 +25,7 @@ serve(async (req: Request) => {
       return Response.json({ error: 'query required' }, { status: 400, headers: CORS })
     }
 
-    const targetPlatforms: string[] = platforms || ['apple', 'youtube']
+    const targetPlatforms: string[] = platforms || ['apple', 'youtube', 'spotify']
     const results: PodcastResult[] = []
 
     const searches: Promise<PodcastResult[]>[] = []
@@ -33,6 +35,9 @@ serve(async (req: Request) => {
     }
     if (targetPlatforms.includes('youtube') && YOUTUBE_API_KEY) {
       searches.push(searchYouTube(query, limit))
+    }
+    if (targetPlatforms.includes('spotify') && SPOTIFY_CLIENT_ID && SPOTIFY_CLIENT_SECRET) {
+      searches.push(searchSpotify(query, limit))
     }
 
     const batches = await Promise.allSettled(searches)
@@ -113,6 +118,48 @@ async function searchYouTube(query: string, limit: number): Promise<PodcastResul
   }))
 
   return [...channelResults, ...playlistResults]
+}
+
+// ----- Spotify (Client Credentials flow — public catalog, no user data) -----
+async function searchSpotify(query: string, limit: number): Promise<PodcastResult[]> {
+  const token = await getSpotifyToken()
+  if (!token) return []
+
+  // Spotify's show search rejects limit >= 20 (400 "Invalid limit"), so cap at 10.
+  const url = `https://api.spotify.com/v1/search?q=${encodeURIComponent(query)}&type=show&market=US&limit=${Math.min(limit, 10)}`
+  const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+  if (!resp.ok) return []
+  const data = await resp.json()
+
+  return (data.shows?.items || [])
+    .filter((s: any) => s && s.id)
+    .map((s: any): PodcastResult => ({
+      title:       s.name,
+      author:      s.publisher || '',
+      description: s.description || '',
+      artwork_url: s.images?.[0]?.url || '',
+      platform:    'spotify',
+      platform_id: s.id,
+      feed_url:    null,
+      website_url: s.external_urls?.spotify || `https://open.spotify.com/show/${s.id}`,
+    }))
+}
+
+async function getSpotifyToken(): Promise<string> {
+  try {
+    const resp = await fetch('https://accounts.spotify.com/api/token', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Basic ' + btoa(`${SPOTIFY_CLIENT_ID}:${SPOTIFY_CLIENT_SECRET}`),
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: 'grant_type=client_credentials',
+    })
+    if (!resp.ok) return ''
+    return (await resp.json()).access_token || ''
+  } catch {
+    return ''
+  }
 }
 
 interface PodcastResult {
