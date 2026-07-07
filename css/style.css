@@ -258,6 +258,12 @@ nav {
 .podcast-card-author{font-size:.75rem;color:var(--text-muted)}
 .podcast-card-footer{display:flex;align-items:center;justify-content:space-between;margin-top:auto;padding-top:.5rem}
 
+/* Source picker on grouped search results */
+.source-picker{display:flex;flex-wrap:wrap;gap:.3rem;margin-top:auto;padding-top:.5rem}
+.src-chip{padding:.2rem .5rem;border-radius:14px;border:1px solid var(--border);background:var(--bg-card);color:var(--text-muted);font-size:.72rem;font-weight:600;cursor:pointer;font-family:inherit;transition:all .12s;white-space:nowrap}
+.src-chip:hover{border-color:var(--border-bright);color:var(--accent-bright)}
+.src-chip.active{background:rgba(168,85,247,.15);border-color:var(--accent);color:var(--accent-bright)}
+
 /* DJ Setlist episode rows */
 .episode-row {
   display: flex;

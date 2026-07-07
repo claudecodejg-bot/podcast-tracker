@@ -86,7 +86,7 @@
 <script type="module">
   import { supabase } from './js/supabase-client.js'
   import { initNav, getCurrentUser } from './js/auth.js'
-  import { searchPodcasts, parseUrl, addPodcast, platformBadge, looksLikeUrl } from './js/search.js'
+  import { searchPodcasts, parseUrl, addPodcast, platformBadge, looksLikeUrl, groupPodcastResults, PLATFORM_META } from './js/search.js?v=grouping'
   import { initShareModal } from './js/share.js'
   import { initNotificationDropdown } from './js/notifications.js'
 
@@ -212,9 +212,7 @@
 
   function applyFilters() {
     if (!searchResults) return
-    let filtered = searchResults
-    if (activePlatform) filtered = filtered.filter(p => p.platform === activePlatform)
-    renderGrid(filtered, document.getElementById('results-grid'))
+    renderGrid(searchResults, document.getElementById('results-grid'), activePlatform)
   }
 
   async function doSearch() {
@@ -242,7 +240,8 @@
       searchResults = await searchPodcasts(q)
     }
 
-    document.getElementById('results-count').textContent = `${searchResults.length} result${searchResults.length !== 1 ? 's' : ''}`
+    const showCount = groupPodcastResults(searchResults).length
+    document.getElementById('results-count').textContent = `${showCount} show${showCount !== 1 ? 's' : ''}`
     applyFilters()
   }
 
@@ -251,9 +250,15 @@
     if (e.key === 'Enter') doSearch()
   })
 
-  function renderGrid(podcasts, grid = document.getElementById('results-grid')) {
+  // Renders results as one card per show. Each card carries all the show's
+  // sources (Apple / YouTube / Spotify); the user picks which to add.
+  // `preferred` (a platform string) filters to shows offering it and
+  // pre-selects that source.
+  function renderGrid(podcasts, grid = document.getElementById('results-grid'), preferred = '') {
+    let groups = groupPodcastResults(podcasts)
+    if (preferred) groups = groups.filter(g => g.some(s => s.platform === preferred))
 
-    if (!podcasts.length) {
+    if (!groups.length) {
       grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1">
         <div class="empty-icon">🔍</div>
         <h3>No podcasts found</h3>
@@ -262,88 +267,78 @@
       return
     }
 
-    grid.innerHTML = podcasts.map(p => podcastCardHTML(p)).join('')
+    grid.innerHTML = groups.map((sources, i) => groupCardHTML(sources, i, preferred)).join('')
 
-    // Wire up subscribe buttons
-    grid.querySelectorAll('[data-subscribe]').forEach(btn => {
+    // Source chip selection
+    grid.querySelectorAll('.src-chip').forEach(chip => {
+      chip.addEventListener('click', () => selectSource(chip))
+    })
+
+    // Add & subscribe using the card's currently selected source
+    grid.querySelectorAll('[data-add-group]').forEach(btn => {
       btn.addEventListener('click', async (e) => {
         e.stopPropagation()
         if (!currentUser) { window.location.href = 'login.html'; return }
-        await handleSubscribe(btn)
-      })
-    })
-
-    // Wire up card clicks
-    grid.querySelectorAll('.podcast-card[data-podcast-id]').forEach(card => {
-      card.addEventListener('click', () => {
-        window.location.href = `podcast.html?id=${card.dataset.podcastId}`
-      })
-    })
-
-    // Wire up "Add & Subscribe" for external search results
-    grid.querySelectorAll('[data-add-podcast]').forEach(btn => {
-      btn.addEventListener('click', async (e) => {
-        e.stopPropagation()
-        if (!currentUser) { window.location.href = 'login.html'; return }
-        await handleAddAndSubscribe(btn)
+        await handleAddSelected(btn)
       })
     })
   }
 
-  function podcastCardHTML(p) {
-    const isInDB    = !!p.id
-    const artSrc    = p.artwork_url
-    const artEl     = artSrc
+  function groupCardHTML(sources, groupIdx, preferred) {
+    // Which source is selected by default
+    let sel = 0
+    if (preferred) {
+      const pIdx = sources.findIndex(s => s.platform === preferred)
+      if (pIdx >= 0) sel = pIdx
+    }
+    const rep     = sources[sel]
+    const artSrc  = sources.find(s => s.artwork_url)?.artwork_url || ''
+    const artEl   = artSrc
       ? `<img class="podcast-card-art" src="${artSrc}" alt="" loading="lazy" onerror="this.style.display='none'">`
       : `<div class="podcast-card-art-placeholder">🎙️</div>`
-    const likes     = p.like_count ?? 0
-    const actionBtn = isInDB
-      ? `<button class="subscribe-btn btn-sm" data-subscribe="${p.id}" data-subscribed="false">+ Follow</button>`
-      : `<button class="btn btn-outline btn-sm" data-add-podcast data-podcast='${JSON.stringify(p).replace(/'/g, "&#39;")}'>+ Add</button>`
+
+    const picker = sources.length > 1
+      ? `<div class="source-picker" data-group="${groupIdx}">
+          ${sources.map((s, idx) => {
+            const [icon,, label] = PLATFORM_META[s.platform] || ['🎙️','', s.platform]
+            return `<button class="src-chip ${idx === sel ? 'active' : ''}"
+                      data-group="${groupIdx}"
+                      data-podcast='${JSON.stringify(s).replace(/'/g, "&#39;")}'>${icon} ${label}</button>`
+          }).join('')}
+        </div>`
+      : `<div class="podcast-card-footer">${platformBadge(rep.platform)}</div>`
 
     return `
-      <div class="podcast-card" data-podcast-id="${p.id || ''}">
+      <div class="podcast-card" data-group="${groupIdx}">
         ${artEl}
         <div class="podcast-card-body">
-          <div class="podcast-card-title">${escHtml(p.title)}</div>
-          <div class="podcast-card-author text-muted">${escHtml(p.author || '')}</div>
-          <div class="podcast-card-footer">
-            ${platformBadge(p.platform)}
-            ${likes ? `<span class="text-muted text-sm">❤️ ${likes}</span>` : ''}
+          <div class="podcast-card-title">${escHtml(rep.title)}</div>
+          <div class="podcast-card-author text-muted">${escHtml(rep.author || '')}</div>
+          ${picker}
+          <div style="margin-top:0.5rem">
+            <button class="btn btn-outline btn-sm" data-add-group="${groupIdx}"
+                    data-podcast='${JSON.stringify(rep).replace(/'/g, "&#39;")}'>+ Add</button>
           </div>
-          <div style="margin-top:0.5rem">${actionBtn}</div>
         </div>
       </div>`
   }
 
-  async function handleSubscribe(btn) {
-    const podcastId = btn.dataset.subscribe
-    const subscribed = btn.dataset.subscribed === 'true'
-
-    if (subscribed) {
-      await supabase.from('subscriptions').delete()
-        .eq('user_id', currentUser.id).eq('podcast_id', podcastId)
-      btn.textContent = '+ Follow'
-      btn.dataset.subscribed = 'false'
-      btn.classList.remove('subscribed')
-    } else {
-      await supabase.from('subscriptions').upsert(
-        { user_id: currentUser.id, podcast_id: podcastId },
-        { onConflict: 'user_id,podcast_id' }
-      )
-      btn.textContent = '✓ Following'
-      btn.dataset.subscribed = 'true'
-      btn.classList.add('subscribed')
-    }
+  // Mark a chip active and point the card's Add button at that source
+  function selectSource(chip) {
+    const groupIdx = chip.dataset.group
+    const card = chip.closest('.podcast-card')
+    card.querySelectorAll('.src-chip').forEach(c => c.classList.remove('active'))
+    chip.classList.add('active')
+    const addBtn = card.querySelector('[data-add-group]')
+    if (addBtn) addBtn.dataset.podcast = chip.dataset.podcast
   }
 
-  async function handleAddAndSubscribe(btn) {
+  async function handleAddSelected(btn) {
     btn.disabled = true
     btn.textContent = 'Adding…'
     try {
       const podcastData = JSON.parse(btn.dataset.podcast)
       const { podcast_id } = await addPodcast(podcastData)
-      // Subscribe
       await supabase.from('subscriptions').upsert(
         { user_id: currentUser.id, podcast_id },
         { onConflict: 'user_id,podcast_id' }

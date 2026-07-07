@@ -87,14 +87,60 @@ export function looksLikeUrl(text) {
 
 /** Returns the platform badge HTML for a given platform string */
 export function platformBadge(platform) {
-  const map = {
-    youtube:  ['▶', 'badge-platform-youtube',  'YouTube'],
-    apple:    ['🎵', 'badge-platform-apple',   'Apple'],
-    spotify:  ['🎧', 'badge-platform-spotify', 'Spotify'],
-    rss:      ['📡', 'badge-platform-rss',     'RSS'],
-  }
-  const [icon, cls, label] = map[platform] || ['🎙️', '', platform]
+  const [icon, cls, label] = PLATFORM_META[platform] || ['🎙️', '', platform]
   return `<span class="badge ${cls}">${icon} ${label}</span>`
+}
+
+/** Platform display metadata: [icon, badge class, label] */
+export const PLATFORM_META = {
+  youtube:  ['▶', 'badge-platform-youtube',  'YouTube'],
+  apple:    ['🎵', 'badge-platform-apple',   'Apple'],
+  spotify:  ['🎧', 'badge-platform-spotify', 'Spotify'],
+  rss:      ['📡', 'badge-platform-rss',     'RSS'],
+}
+
+// Preferred source order when a show is available on several platforms.
+const PLATFORM_ORDER = ['youtube', 'spotify', 'apple', 'rss']
+
+/**
+ * Normalized key for grouping the same show across platforms.
+ * Lowercases, drops punctuation and a trailing "podcast"/"show" word,
+ * collapses whitespace. Deliberately conservative — merges obvious
+ * matches ("Fantasy Baseball Today" on Apple + YouTube) without being
+ * so aggressive that distinct shows collide.
+ */
+export function normalizeShowKey(p) {
+  return String(p.title || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+(podcast|show)\s*$/,'')
+    .trim()
+    .replace(/\s+/g, ' ')
+}
+
+/**
+ * Groups a flat list of search results into per-show groups, each an
+ * array of that show's sources sorted by PLATFORM_ORDER. Order of first
+ * appearance is preserved across groups.
+ * @returns {Array<Array>} array of source-arrays
+ */
+export function groupPodcastResults(list) {
+  const map = new Map()
+  const order = []
+  for (const p of list || []) {
+    const key = normalizeShowKey(p) || `${p.platform}:${p.platform_id}`
+    if (!map.has(key)) { map.set(key, []); order.push(key) }
+    map.get(key).push(p)
+  }
+  const rank = (plat) => {
+    const i = PLATFORM_ORDER.indexOf(plat)
+    return i === -1 ? PLATFORM_ORDER.length : i
+  }
+  return order.map(k => {
+    const sources = map.get(k)
+    sources.sort((a, b) => rank(a.platform) - rank(b.platform))
+    return sources
+  })
 }
 
 /** Returns rank badge HTML based on likes_vs_avg score */
