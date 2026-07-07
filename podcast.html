@@ -43,6 +43,7 @@
   import { initNav, getCurrentUser } from './js/auth.js'
   import { platformBadge, rankBadge, formatDate, formatDuration, formatCount } from './js/search.js'
   import { initShareModal, openShareModal } from './js/share.js'
+  import { renderAlternatives } from './js/alternatives.js?v=alt1'
 
   document.getElementById('footer-year').textContent = new Date().getFullYear()
   document.getElementById('nav-hamburger').addEventListener('click', () => {
@@ -161,6 +162,8 @@
         </div>
       </div>
 
+      <div id="alt-sources-mount"></div>
+
       <!-- Episodes -->
       <div class="card" style="margin-top:1.5rem">
         <div class="section-header">
@@ -184,6 +187,14 @@
     })
     document.getElementById('sort-newest').addEventListener('click', () => { sortMode = 'newest'; renderEpisodes() })
     document.getElementById('sort-top').addEventListener('click', ()    => { sortMode = 'top';    renderEpisodes() })
+
+    // "Also available on" — same show on other platforms
+    renderAlternatives(document.getElementById('alt-sources-mount'), {
+      showTitle:       podcast.title,
+      currentPlatform: podcast.platform,
+      preferred:       currentUser?.preferred_platform || null,
+      loggedIn:        !!currentUser,
+    }).catch(err => console.error('alternatives failed:', err.message))
 
     // Episode share buttons
     container.querySelectorAll('[data-share-episode]').forEach(btn => {

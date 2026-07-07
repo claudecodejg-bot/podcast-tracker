@@ -90,6 +90,7 @@
     logEpisode, addToQueue, isInQueue
   } from './js/ratings.js'
   import { initNotificationDropdown } from './js/notifications.js'
+  import { renderAlternatives } from './js/alternatives.js?v=alt1'
 
   document.getElementById('footer-year').textContent = new Date().getFullYear()
   document.getElementById('nav-hamburger').addEventListener('click', () => {
@@ -222,6 +223,8 @@
           allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture">
         </iframe>
       </div>` : ''}
+
+      <div id="alt-sources-mount"></div>
 
       <div class="card mt-2">
         <!-- Episode header -->
@@ -362,6 +365,15 @@
     if (histEl && ratingStats.count > 0) {
       renderHistogram(histEl, ratingStats.histogram, ratingStats.count)
     }
+
+    // "Also available on" — same episode/show on other platforms (best effort)
+    renderAlternatives(document.getElementById('alt-sources-mount'), {
+      showTitle:       podcast?.title,
+      currentPlatform: podcast?.platform,
+      preferred:       currentUser?.preferred_platform || null,
+      loggedIn:        !!currentUser,
+      episode:         { title: episode.title, published_at: episode.published_at },
+    }).catch(err => console.error('alternatives failed:', err.message))
   }
 
   async function toggleEpLike() {

@@ -66,6 +66,15 @@
               <option value="light">Light</option>
             </select>
           </label>
+          <label style="display:flex;align-items:center;gap:.4rem;font-size:.82rem;color:var(--gray-600)">
+            Preferred source:
+            <select id="platform-select" style="font-size:.82rem;padding:.25rem .4rem;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text)">
+              <option value="">No preference</option>
+              <option value="youtube">YouTube</option>
+              <option value="apple">Apple</option>
+              <option value="spotify">Spotify</option>
+            </select>
+          </label>
         </div>
       </div>
     </div>
@@ -242,7 +251,7 @@
     // Fetch user record
     const { data: user } = await supabase
       .from('users')
-      .select('id, full_name, email, created_at, follow_policy')
+      .select('id, full_name, email, created_at, follow_policy, preferred_platform')
       .eq('id', userId)
       .maybeSingle()
 
@@ -274,6 +283,22 @@
         localStorage.setItem('pt-theme', t)
         if (t === 'dark') document.documentElement.removeAttribute('data-theme')
         else document.documentElement.setAttribute('data-theme', t)
+      })
+
+      // Preferred source picker
+      const platformSelect = document.getElementById('platform-select')
+      platformSelect.value = user.preferred_platform || ''
+      platformSelect.addEventListener('change', async () => {
+        const { error } = await supabase
+          .from('users')
+          .update({ preferred_platform: platformSelect.value || null })
+          .eq('id', me.id)
+        if (error) {
+          console.error('Could not save preferred platform:', error.message)
+          platformSelect.value = user.preferred_platform || ''
+        } else {
+          user.preferred_platform = platformSelect.value || null
+        }
       })
 
       const policySelect = document.getElementById('follow-policy-select')

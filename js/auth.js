@@ -57,7 +57,7 @@ export async function getCurrentUser() {
 
   const { data: user } = await supabase
     .from('users')
-    .select('id, full_name, is_admin')
+    .select('id, full_name, is_admin, preferred_platform')
     .eq('auth_id', session.user.id)
     .maybeSingle()
   if (user) return user
