@@ -18,18 +18,46 @@ function titleSim(a, b) {
   return inter / (A.size + B.size - inter)
 }
 
+// Cache results per show for the tab session, so revisiting an episode/podcast
+// page doesn't re-hit the search API. sessionStorage clears on tab close; a
+// short TTL guards against staleness within a long-lived tab.
+const ALT_CACHE_TTL_MS = 60 * 60 * 1000  // 1 hour
+
+function readAltCache(cacheKey) {
+  try {
+    const raw = sessionStorage.getItem(cacheKey)
+    if (!raw) return null
+    const { at, alts } = JSON.parse(raw)
+    if (Date.now() - at > ALT_CACHE_TTL_MS) return null
+    return alts
+  } catch { return null }
+}
+
+function writeAltCache(cacheKey, alts) {
+  try { sessionStorage.setItem(cacheKey, JSON.stringify({ at: Date.now(), alts })) } catch { /* quota/full — ignore */ }
+}
+
 /**
  * Same show on other platforms, via live search of the show title.
+ * Cached per (show, platform) for the tab session.
  * @returns {Promise<Array>} search source objects on platforms != currentPlatform
  */
 export async function findShowAlternatives(showTitle, currentPlatform) {
   if (!showTitle) return []
+  const key      = normalizeShowKey({ title: showTitle })
+  const cacheKey = `alt:${key}|${currentPlatform}`
+
+  const cached = readAltCache(cacheKey)
+  if (cached) return cached
+
   const results = await searchPodcasts(showTitle, { limit: 10 })
   if (!results.length) return []
-  const key    = normalizeShowKey({ title: showTitle })
   const groups = groupPodcastResults(results)
   const group  = groups.find(g => normalizeShowKey(g[0]) === key) || groups[0]
-  return (group || []).filter(s => s.platform !== currentPlatform)
+  const alts   = (group || []).filter(s => s.platform !== currentPlatform)
+
+  writeAltCache(cacheKey, alts)
+  return alts
 }
 
 /** Add (upsert) the alternative show; returns its podcast id. */
