@@ -154,7 +154,7 @@
         <a href="episode.html?id=${ep.id}" class="trending-card" style="text-decoration:none">
           <div class="trending-rank">${i + 1}</div>
           ${p?.artwork_url
-            ? `<img class="trending-art" src="${escHtml(p.artwork_url)}" alt="" loading="lazy">`
+            ? `<img referrerpolicy="no-referrer" class="trending-art" src="${escHtml(p.artwork_url)}" alt="" loading="lazy">`
             : '<div class="trending-art" style="display:flex;align-items:center;justify-content:center;font-size:1.4rem">🎙️</div>'
           }
           <div class="trending-info">
@@ -193,7 +193,7 @@
     grid.innerHTML = sorted.map(p => `
       <a href="podcast.html?id=${p.id}" class="podcast-card" style="text-decoration:none">
         ${p.artwork_url
-          ? `<img class="podcast-card-art" src="${escHtml(p.artwork_url)}" alt="" loading="lazy">`
+          ? `<img referrerpolicy="no-referrer" class="podcast-card-art" src="${escHtml(p.artwork_url)}" alt="" loading="lazy">`
           : '<div class="podcast-card-art-placeholder">🎙️</div>'
         }
         <div class="podcast-card-body">
@@ -231,7 +231,7 @@
       return `
         <a href="episode.html?id=${ep.id}" class="trending-card" style="text-decoration:none">
           ${p?.artwork_url
-            ? `<img class="trending-art" src="${escHtml(p.artwork_url)}" alt="" loading="lazy">`
+            ? `<img referrerpolicy="no-referrer" class="trending-art" src="${escHtml(p.artwork_url)}" alt="" loading="lazy">`
             : '<div class="trending-art" style="display:flex;align-items:center;justify-content:center;font-size:1.4rem">🎙️</div>'
           }
           <div class="trending-info">
@@ -282,7 +282,7 @@
             <div class="activity-time">${formatDate(e.listened_on)}</div>
           </div>
           ${pod?.artwork_url
-            ? `<img class="activity-art" src="${escHtml(pod.artwork_url)}" alt="" loading="lazy">`
+            ? `<img referrerpolicy="no-referrer" class="activity-art" src="${escHtml(pod.artwork_url)}" alt="" loading="lazy">`
             : ''}
         </a>`
     }).join('')

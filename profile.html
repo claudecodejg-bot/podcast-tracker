@@ -489,7 +489,7 @@
         return `
           <a href="podcast.html?id=${pod.id}" class="fave-slot" title="${escHtml(pod.title)}">
             ${pod.artwork_url
-              ? `<img src="${escHtml(pod.artwork_url)}" alt="${escHtml(pod.title)}" loading="lazy">`
+              ? `<img referrerpolicy="no-referrer" src="${escHtml(pod.artwork_url)}" alt="${escHtml(pod.title)}" loading="lazy">`
               : `<div class="fave-placeholder">🎙️</div>`}
           </a>`
       }
@@ -532,7 +532,7 @@
       return `
         <a href="episode.html?id=${ep.id}" class="diary-entry" style="text-decoration:none">
           ${p?.artwork_url
-            ? `<img class="trending-art" src="${escHtml(p.artwork_url)}" alt="" loading="lazy">`
+            ? `<img referrerpolicy="no-referrer" class="trending-art" src="${escHtml(p.artwork_url)}" alt="" loading="lazy">`
             : '<div class="trending-art" style="display:flex;align-items:center;justify-content:center;font-size:1.4rem">🎙️</div>'}
           <div class="diary-meta">
             <div class="diary-date">${formatDate(e.listened_on)}</div>
@@ -589,7 +589,7 @@
       return `
         <a href="episode.html?id=${ep.id}" class="trending-card" style="text-decoration:none">
           ${p?.artwork_url
-            ? `<img class="trending-art" src="${escHtml(p.artwork_url)}" alt="" loading="lazy">`
+            ? `<img referrerpolicy="no-referrer" class="trending-art" src="${escHtml(p.artwork_url)}" alt="" loading="lazy">`
             : '<div class="trending-art" style="display:flex;align-items:center;justify-content:center;font-size:1.4rem">🎙️</div>'}
           <div class="trending-info">
             <div class="trending-title">${escHtml(ep?.title || '')}</div>
@@ -624,7 +624,7 @@
         <div class="review-card">
           <div class="review-card-header">
             ${p?.artwork_url
-              ? `<img class="trending-art" src="${escHtml(p.artwork_url)}" alt="" loading="lazy" style="border-radius:4px">`
+              ? `<img referrerpolicy="no-referrer" class="trending-art" src="${escHtml(p.artwork_url)}" alt="" loading="lazy" style="border-radius:4px">`
               : ''}
             <div>
               <a href="episode.html?id=${ep.id}" class="review-ep-link">${escHtml(ep?.title || '')}</a>
@@ -710,7 +710,7 @@
           <span class="fave-slot-num">${slot}</span>
           <div class="fave-slot-preview">
             ${cur
-              ? `<img src="${escHtml(cur.artwork_url || '')}" alt="" style="width:40px;height:40px;object-fit:cover;border-radius:4px">
+              ? `<img referrerpolicy="no-referrer" src="${escHtml(cur.artwork_url || '')}" alt="" style="width:40px;height:40px;object-fit:cover;border-radius:4px">
                  <span>${escHtml(cur.title)}</span>`
               : `<span class="text-muted">— empty —</span>`}
           </div>

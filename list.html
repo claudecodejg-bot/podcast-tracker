@@ -146,7 +146,7 @@
         <a href="episode.html?id=${ep.id}" class="trending-card" style="text-decoration:none">
           <div class="trending-rank">${index + 1}</div>
           ${epPod?.artwork_url
-            ? `<img class="trending-art" src="${escHtml(epPod.artwork_url)}" alt="" loading="lazy">`
+            ? `<img referrerpolicy="no-referrer" class="trending-art" src="${escHtml(epPod.artwork_url)}" alt="" loading="lazy">`
             : '<div class="trending-art" style="display:flex;align-items:center;justify-content:center;font-size:1.4rem">🎙️</div>'}
           <div class="trending-info">
             <div class="trending-title">${escHtml(ep.title)}</div>
@@ -162,7 +162,7 @@
         <a href="podcast.html?id=${pod.id}" class="trending-card" style="text-decoration:none">
           <div class="trending-rank">${index + 1}</div>
           ${pod.artwork_url
-            ? `<img class="trending-art" src="${escHtml(pod.artwork_url)}" alt="" loading="lazy">`
+            ? `<img referrerpolicy="no-referrer" class="trending-art" src="${escHtml(pod.artwork_url)}" alt="" loading="lazy">`
             : '<div class="trending-art" style="display:flex;align-items:center;justify-content:center;font-size:1.4rem">🎙️</div>'}
           <div class="trending-info">
             <div class="trending-title">${escHtml(pod.title)}</div>

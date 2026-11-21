@@ -294,7 +294,7 @@
     const rep     = sources[sel]
     const artSrc  = sources.find(s => s.artwork_url)?.artwork_url || ''
     const artEl   = artSrc
-      ? `<img class="podcast-card-art" src="${artSrc}" alt="" loading="lazy" onerror="this.style.display='none'">`
+      ? `<img referrerpolicy="no-referrer" class="podcast-card-art" src="${artSrc}" alt="" loading="lazy" onerror="this.style.display='none'">`
       : `<div class="podcast-card-art-placeholder">🎙️</div>`
 
     const picker = sources.length > 1

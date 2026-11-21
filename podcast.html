@@ -128,7 +128,7 @@
 
       <div class="podcast-hero mt-2">
         ${podcast.artwork_url
-          ? `<img class="podcast-hero-art" src="${escHtml(podcast.artwork_url)}" alt="" loading="lazy">`
+          ? `<img referrerpolicy="no-referrer" class="podcast-hero-art" src="${escHtml(podcast.artwork_url)}" alt="" loading="lazy">`
           : `<div class="podcast-hero-art" style="display:flex;align-items:center;justify-content:center;font-size:3rem;background:var(--accent-light)">🎙️</div>`
         }
         <div class="podcast-hero-info">
